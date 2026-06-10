@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyGate — Resident</title>
+<link rel="manifest" href="/resident/manifest.json">
+<meta name="theme-color" content="#1a73e8">
+<script src="/frontend/shared/theme.js"></script>
+<link rel="stylesheet" href="/frontend/shared/style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+</head>
+<body>
+
+<!-- ── Login Screen ──────────────────────────────────────────────── -->
+<div id="login-screen" class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo">🏠 MyGate</div>
+    <p class="login-sub">Resident Portal</p>
+
+    <div id="step-phone">
+      <div class="form-group">
+        <label>Mobile Number</label>
+        <input id="inp-phone" class="form-control" type="tel" placeholder="+91 98765 43210">
+      </div>
+      <button class="btn btn-primary btn-full btn-lg" onclick="sendOtp()">Send OTP</button>
+      <div class="dev-hint">
+        <strong>Dev credentials</strong><br>Phone: <code>+912222222222</code>&nbsp;&nbsp;OTP: <code>222222</code>
+      </div>
+    </div>
+
+    <div id="step-otp" style="display:none">
+      <p style="margin-bottom:16px;color:var(--muted);font-size:.9rem">Enter the 6-digit OTP sent to <strong id="otp-phone-display"></strong></p>
+      <div class="form-group">
+        <label>OTP</label>
+        <input id="inp-otp" class="form-control" type="number" placeholder="_ _ _ _ _ _" maxlength="6">
+      </div>
+      <button class="btn btn-primary btn-full btn-lg" onclick="verifyOtp()">Verify & Login</button>
+      <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="resetLogin()">← Change number</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── App Shell (hidden until logged in) ────────────────────────── -->
+<div id="app-shell" style="display:none">
+  <div class="topbar">
+    <span class="topbar-brand">🏠 MyGate</span>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span class="topbar-user" id="user-name-display" onclick="showPage('page-profile')">My Profile</span>
+      <button class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+    </div>
+  </div>
+
+  <!-- Pages -->
+  <div style="padding-bottom:64px">
+
+    <!-- Dashboard -->
+    <div id="page-dashboard" class="page active" style="padding:16px">
+      <div class="stats-grid" id="dashboard-stats"></div>
+
+      <!-- SOS -->
+      <div style="text-align:center;margin:16px 0">
+        <button class="sos-btn" onclick="triggerSOS()">SOS</button>
+        <p style="font-size:.75rem;color:var(--muted);margin-top:6px">Tap for emergency help</p>
+      </div>
+
+      <!-- Pending approvals -->
+      <div class="card">
+        <div class="card-header">⏳ Pending Approvals</div>
+        <div id="pending-visitors"></div>
+      </div>
+    </div>
+
+    <!-- Visitors -->
+    <div id="page-visitors" class="page" style="padding:16px">
+      <h2 class="page-title">Visitors</h2>
+      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-ghost" id="tab-invites-btn" onclick="showVisitorTab('invites')">🔑 Active Invites</button>
+        <button class="btn btn-ghost" id="tab-history-btn" onclick="showVisitorTab('history')">📋 History</button>
+        <button class="btn btn-primary" style="margin-left:auto" onclick="openInviteModal()">+ Invite Guest</button>
+      </div>
+      <div id="visitors-invites-panel"></div>
+      <div id="visitors-history-panel" style="display:none"></div>
+    </div>
+
+    <!-- Deliveries -->
+    <div id="page-delivery" class="page" style="padding:16px">
+      <h2 class="page-title">Deliveries</h2>
+      <div id="delivery-list"></div>
+    </div>
+
+    <!-- Domestic Help -->
+    <div id="page-helpers" class="page" style="padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 class="page-title" style="margin:0">My Helpers</h2>
+        <button class="btn btn-primary" onclick="openModal('modal-add-helper')">+ Add Helper</button>
+      </div>
+      <div id="helpers-list"></div>
+    </div>
+
+    <!-- Vehicles -->
+    <div id="page-vehicles" class="page" style="padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 class="page-title" style="margin:0">My Vehicles</h2>
+        <button class="btn btn-primary" onclick="openModal('modal-add-vehicle')">+ Add Vehicle</button>
+      </div>
+      <div id="vehicle-slot-bar" style="margin-bottom:16px"></div>
+      <div id="vehicles-list"></div>
+    </div>
+
+    <!-- Community -->
+    <div id="page-community" class="page" style="padding:16px">
+      <h2 class="page-title">Community</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+        <button class="btn btn-ghost" onclick="loadNotices()">📋 Notices</button>
+        <button class="btn btn-ghost" onclick="loadPolls()">📊 Polls</button>
+        <button class="btn btn-ghost" onclick="loadEvents()">🎉 Events</button>
+        <button class="btn btn-ghost" onclick="loadForum()">💬 Forum</button>
+      </div>
+      <div id="community-content"></div>
+    </div>
+
+    <!-- Billing -->
+    <div id="page-billing" class="page" style="padding:16px">
+      <h2 class="page-title">Billing</h2>
+      <div id="invoices-list"></div>
+    </div>
+
+    <!-- Profile -->
+    <div id="page-profile" class="page" style="padding:16px">
+      <h2 class="page-title">My Profile</h2>
+      <div class="card">
+        <div class="form-group">
+          <label>Full Name</label>
+          <input id="profile-name" class="form-control" type="text">
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input id="profile-email" class="form-control" type="email">
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+          <label style="font-size:.9rem;font-weight:500">Kids Checkout</label>
+          <input type="checkbox" id="kids-checkout-toggle" style="width:20px;height:20px" onchange="toggleKidsCheckout(this.checked)">
+        </div>
+        <button class="btn btn-primary" onclick="saveProfile()">Save Changes</button>
+        <button class="btn btn-ghost" style="margin-top:8px" onclick="logout()">Logout</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom Nav -->
+  <nav class="bottom-nav">
+    <a href="#" data-page="page-dashboard" onclick="showPage('page-dashboard')"><span class="icon">🏠</span>Home</a>
+    <a href="#" data-page="page-visitors"  onclick="showPage('page-visitors');loadVisitors()"><span class="icon">👤</span>Visitors</a>
+    <a href="#" data-page="page-vehicles"  onclick="showPage('page-vehicles');loadMyVehicles()"><span class="icon">🚗</span>Vehicles</a>
+    <a href="#" data-page="page-helpers"   onclick="showPage('page-helpers');loadHelpers()"><span class="icon">🧹</span>Helpers</a>
+    <a href="#" data-page="page-community" onclick="showPage('page-community')"><span class="icon">🏘️</span>Community</a>
+  </nav>
+</div>
+
+<!-- ── Modals ─────────────────────────────────────────────────────── -->
+<div id="modal-invite" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-invite')">
+  <div class="modal-box">
+    <div class="modal-title">Invite Guest</div>
+    <div class="form-group">
+      <label>Your Flat</label>
+      <input id="inv-flat-display" class="form-control" type="text" readonly style="background:var(--surface);color:var(--muted);cursor:default">
+    </div>
+    <div class="form-group"><label>Visitor Name *</label><input id="inv-name" class="form-control" type="text" placeholder="Guest full name"></div>
+    <div class="form-group"><label>Visitor Phone</label><input id="inv-phone" class="form-control" type="tel" placeholder="+91 98765 43210"></div>
+    <div class="form-group"><label>Valid From</label><input id="inv-from" class="form-control" type="datetime-local"></div>
+    <div class="form-group"><label>Valid Until</label><input id="inv-until" class="form-control" type="datetime-local"></div>
+    <div class="form-group" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="inv-recurring"><label for="inv-recurring">Recurring Daily</label>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="createInvite()">Send Invite</button>
+  </div>
+</div>
+
+<div id="modal-add-helper" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-add-helper')">
+  <div class="modal-box">
+    <div class="modal-title">Add Daily Help</div>
+    <div class="form-group"><label>Name</label><input id="h-name" class="form-control" type="text"></div>
+    <div class="form-group"><label>Phone</label><input id="h-phone" class="form-control" type="tel"></div>
+    <div class="form-group">
+      <label>Type</label>
+      <select id="h-type" class="form-control">
+        <option value="maid">Maid</option><option value="cook">Cook</option>
+        <option value="driver">Driver</option><option value="nanny">Nanny</option>
+        <option value="cleaner">Cleaner</option><option value="other">Other</option>
+      </select>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="addHelper()">Add Helper</button>
+  </div>
+</div>
+
+<div id="modal-sos-confirm" class="modal-overlay">
+  <div class="modal-box" style="text-align:center">
+    <div style="font-size:3rem;margin-bottom:12px">🚨</div>
+    <div class="modal-title">Send Security Alert?</div>
+    <p style="color:var(--muted);margin-bottom:20px">This will alert all security guards and your emergency contacts immediately.</p>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-danger btn-full" onclick="confirmSOS()">Yes, Send Alert</button>
+      <button class="btn btn-ghost btn-full" onclick="closeModal('modal-sos-confirm')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-add-vehicle" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-add-vehicle')">
+  <div class="modal-box">
+    <div class="modal-title">Add Vehicle</div>
+    <div class="form-group"><label>Number Plate *</label><input id="v-plate" class="form-control" type="text" placeholder="MH01AB1234" style="text-transform:uppercase;letter-spacing:2px"></div>
+    <div class="form-group">
+      <label>Type *</label>
+      <select id="v-type" class="form-control">
+        <option value="car">Car</option><option value="bike">Bike</option><option value="scooter">Scooter</option>
+      </select>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="addVehicle()">Register Vehicle</button>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script>window.MG_PORTAL = 'res';</script>
+<script src="/frontend/shared/api.js"></script>
+<script src="/frontend/resident/js/resident.js"></script>
+<script>
+  // Init Supabase for realtime
+  const SUPABASE_URL = 'https://olkudsuwbggebcdqpwfg.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9sa3Vkc3V3YmdnZWJjZHFwd2ZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMDczNzksImV4cCI6MjA5NjU4MzM3OX0.oFA6tW62iWY_ua6nOBJm4l82507qdad-Rx5d_0tH2PI';
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  initTheme();
+</script>
+</body>
+</html>

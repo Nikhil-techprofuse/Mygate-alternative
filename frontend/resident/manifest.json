@@ -1,0 +1,14 @@
+{
+  "name": "MyGate Resident",
+  "short_name": "MyGate",
+  "description": "MyGate Resident Portal",
+  "start_url": "/frontend/resident/index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1a73e8",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

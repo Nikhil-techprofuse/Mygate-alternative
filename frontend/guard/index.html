@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyGate — Guard</title>
+<link rel="manifest" href="/guard/manifest.json">
+<meta name="theme-color" content="#1a73e8">
+<script src="/frontend/shared/theme.js"></script>
+<link rel="stylesheet" href="/frontend/shared/style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-screen" class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo">🛡️ Guard</div>
+    <p class="login-sub">Security Portal</p>
+    <div id="step-phone">
+      <div class="form-group"><label>Mobile Number</label>
+        <input id="inp-phone" class="form-control" type="tel" placeholder="+91 98765 43210">
+      </div>
+      <button class="btn btn-primary btn-full btn-lg" onclick="sendOtp()">Send OTP</button>
+      <div class="dev-hint">
+        <strong>Dev credentials</strong><br>Phone: <code>+911111111111</code>&nbsp;&nbsp;OTP: <code>111111</code>
+      </div>
+    </div>
+    <div id="step-otp" style="display:none">
+      <p style="margin-bottom:16px;font-size:.9rem;color:var(--muted)">OTP sent to <strong id="otp-phone-display"></strong></p>
+      <div class="form-group"><label>OTP</label>
+        <input id="inp-otp" class="form-control big-otp-input" type="number" placeholder="000000" maxlength="6">
+      </div>
+      <button class="btn btn-primary btn-full btn-lg" onclick="verifyOtp()">Login</button>
+      <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="resetLogin()">← Back</button>
+    </div>
+  </div>
+</div>
+
+<!-- App Shell -->
+<div id="app-shell" style="display:none">
+  <div class="topbar">
+    <span class="topbar-brand">🛡️ Guard App</span>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span class="topbar-user" id="gate-name-display">Loading gate...</span>
+      <button class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+    </div>
+  </div>
+
+  <div style="padding:12px 12px 72px">
+
+    <!-- Dashboard -->
+    <div id="page-dashboard" class="page active">
+      <div id="active-alerts"></div>
+      <div class="stats-grid" id="guard-stats" style="margin-bottom:12px"></div>
+      <div class="card">
+        <div class="card-header">⏳ Visitor Queue</div>
+        <div id="visitor-queue"></div>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <div class="card-header">🚗 Recent Vehicle Entries</div>
+        <div id="recent-entries"></div>
+      </div>
+    </div>
+
+    <!-- Visitor Entry -->
+    <div id="page-visitor-entry" class="page">
+      <h2 class="page-title">Visitor Entry</h2>
+
+      <div class="card" style="margin-bottom:12px">
+        <div class="card-header">Verify OTP Invite</div>
+        <div class="form-group">
+          <input id="otp-scan-input" class="form-control big-otp-input" type="number" placeholder="Enter OTP">
+        </div>
+        <button class="btn btn-primary btn-full" onclick="verifyVisitorOtp()">Verify OTP</button>
+        <div id="otp-result" style="margin-top:12px"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">Walk-in Visitor</div>
+        <div class="form-group"><label>Visitor Name *</label>
+          <input id="walkin-name" class="form-control" type="text">
+        </div>
+        <div class="form-group"><label>Phone</label>
+          <input id="walkin-phone" class="form-control" type="tel">
+        </div>
+        <div class="form-group"><label>Flat to Visit *</label>
+          <select id="walkin-flat" class="form-control"><option value="">Select flat...</option></select>
+        </div>
+        <div class="form-group"><label>Type</label>
+          <select id="walkin-type" class="form-control">
+            <option value="guest">Guest</option><option value="vendor">Vendor</option>
+            <option value="cab">Cab / Ride-share</option>
+          </select>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="logWalkin()">Log Entry & Notify Resident</button>
+      </div>
+    </div>
+
+    <!-- Vehicle -->
+    <div id="page-vehicle" class="page">
+      <h2 class="page-title">Vehicle Entry</h2>
+
+      <div class="card" style="margin-bottom:12px">
+        <div class="card-header">Log Entry</div>
+        <div class="form-group"><label>Number Plate *</label>
+          <input id="plate-input" class="form-control" type="text" placeholder="MH01AB1234" style="text-transform:uppercase;font-size:1.1rem;letter-spacing:3px">
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-full" onclick="lookupPlate()">🔍 Lookup</button>
+          <button class="btn btn-primary btn-full" onclick="logVehicleEntry()">Log Entry ↗</button>
+        </div>
+        <div id="plate-result" style="margin-top:12px"></div>
+      </div>
+
+      <div class="card" style="margin-bottom:12px">
+        <div class="card-header">Log Exit</div>
+        <div class="form-group"><label>Number Plate</label>
+          <input id="exit-plate-input" class="form-control" type="text" placeholder="MH01AB1234" style="text-transform:uppercase;font-size:1.1rem;letter-spacing:3px">
+        </div>
+        <button class="btn btn-success btn-full" onclick="logVehicleExitByPlate()">Log Exit ↙</button>
+        <div id="exit-result" style="margin-top:12px"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">Today's Vehicles</div>
+        <div id="vehicle-entries-list"><p style="text-align:center;padding:12px;color:var(--muted)">Loading...</p></div>
+      </div>
+    </div>
+
+    <!-- Delivery -->
+    <div id="page-delivery" class="page">
+      <h2 class="page-title">Delivery</h2>
+      <div class="card" style="margin-bottom:12px">
+        <div class="card-header">Log Delivery</div>
+        <div class="form-group"><label>Flat *</label>
+          <select id="del-flat" class="form-control"><option value="">Select flat...</option></select>
+        </div>
+        <div class="form-group"><label>Platform</label>
+          <select id="del-platform" class="form-control"><option value="">Select...</option></select>
+        </div>
+        <div class="form-group"><label>Tracking ID</label>
+          <input id="del-tracking" class="form-control" type="text">
+        </div>
+        <div class="form-group" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="del-lag" style="width:18px;height:18px">
+          <label>Leave at Gate</label>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="logDelivery()">Log Delivery</button>
+      </div>
+
+      <div class="card">
+        <div class="card-header">Collect Parcel (OTP)</div>
+        <div class="form-group"><input id="parcel-delivery-id" class="form-control" type="text" placeholder="Delivery ID"></div>
+        <div class="form-group"><input id="parcel-otp-input" class="form-control big-otp-input" type="number" placeholder="OTP"></div>
+        <button class="btn btn-success btn-full" onclick="collectParcel()">Verify & Collect</button>
+      </div>
+    </div>
+
+    <!-- Domestic Help -->
+    <div id="page-helpers" class="page">
+      <h2 class="page-title">Daily Help</h2>
+      <div class="card">
+        <div class="form-group">
+          <input id="helper-passcode" class="form-control big-otp-input" type="number" placeholder="Enter Passcode">
+        </div>
+        <button class="btn btn-primary btn-full" onclick="lookupHelper()">Verify Helper</button>
+        <div id="helper-result" style="margin-top:12px"></div>
+        <div id="helper-entry-btn" style="display:none;margin-top:10px">
+          <button class="btn btn-success btn-full" onclick="logHelperEntry()">✓ Log Entry</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Kids Checkout -->
+    <div id="page-kids" class="page">
+      <h2 class="page-title">Kids Checkout</h2>
+      <div class="card">
+        <div class="form-group"><label>Flat Number *</label>
+          <select id="kids-flat" class="form-control"><option value="">Select flat...</option></select>
+        </div>
+        <button class="btn btn-warning btn-full" onclick="initiateKidsCheckout()">Request Parent Approval</button>
+        <div id="kids-result" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <nav class="bottom-nav">
+    <a href="#" data-page="page-dashboard"     onclick="showPage('page-dashboard');loadGuardDashboard()"><span class="icon">🏠</span>Home</a>
+    <a href="#" data-page="page-visitor-entry" onclick="showPage('page-visitor-entry');loadFlatsList()"><span class="icon">👤</span>Visitor</a>
+    <a href="#" data-page="page-vehicle"       onclick="showPage('page-vehicle');loadVehicleEntries()"><span class="icon">🚗</span>Vehicle</a>
+    <a href="#" data-page="page-delivery"      onclick="showPage('page-delivery');loadDeliveryFlats()"><span class="icon">📦</span>Delivery</a>
+    <a href="#" data-page="page-helpers"       onclick="showPage('page-helpers')"><span class="icon">🧹</span>Help</a>
+  </nav>
+</div>
+
+<div id="toast-container"></div>
+
+<script>window.MG_PORTAL = 'grd';</script>
+<script src="/frontend/shared/api.js"></script>
+<script src="/frontend/guard/js/guard.js"></script>
+<script>
+  const SUPABASE_URL = 'https://olkudsuwbggebcdqpwfg.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9sa3Vkc3V3YmdnZWJjZHFwd2ZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMDczNzksImV4cCI6MjA5NjU4MzM3OX0.oFA6tW62iWY_ua6nOBJm4l82507qdad-Rx5d_0tH2PI';
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  initTheme();
+</script>
+</body>
+</html>

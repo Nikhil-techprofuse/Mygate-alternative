@@ -1,0 +1,14 @@
+{
+  "name": "MyGate Guard",
+  "short_name": "Guard",
+  "description": "MyGate Security Guard Portal",
+  "start_url": "/frontend/guard/index.html",
+  "display": "standalone",
+  "background_color": "#0d1b2a",
+  "theme_color": "#1557b0",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "../resident/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "../resident/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
