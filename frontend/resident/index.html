@@ -43,6 +43,27 @@
   </div>
 </div>
 
+<!-- ── Flat Selection Screen ────────────────────────────────────────── -->
+<div id="flat-selection-screen" class="login-wrap" style="display:none">
+  <div class="login-card">
+    <div class="login-logo">🏠 Your Flat</div>
+    <p class="login-sub">Select Your Address</p>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin:20px 0">
+      <div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">BUILDING</div>
+      <select id="flat-sel-building" class="form-control" onchange="onFlatBuildingChange()" style="margin-bottom:16px">
+        <option value="">Select building</option>
+      </select>
+      <div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">FLAT NUMBER</div>
+      <select id="flat-sel-flatno" class="form-control" style="margin-bottom:6px">
+        <option value="">Select flat number</option>
+      </select>
+      <div id="flat-sel-hint" style="font-size:.78rem;color:var(--muted)">Choose building first, then flat number.</div>
+    </div>
+    <button class="btn btn-primary btn-full btn-lg" onclick="confirmFlatSelection()">Proceed to Dashboard</button>
+    <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="logout()">Logout</button>
+  </div>
+</div>
+
 <!-- ── App Shell (hidden until logged in) ────────────────────────── -->
 <div id="app-shell" style="display:none">
   <div class="topbar">

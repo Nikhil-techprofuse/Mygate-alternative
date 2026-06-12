@@ -18,7 +18,7 @@ def add_helper():
     # Generate unique passcode for this society
     while True:
         passcode = generate_numeric_otp(6)
-        existing = sb.table('domestic_helpers').select('id').eq('society_id', g.society_id).eq('passcode', passcode).maybe_single().execute()
+        existing = sb.table('domestic_helpers').select('id').eq('society_id', g.society_id).eq('passcode', passcode).limit(1).execute()
         if not existing.data:
             break
     helper = sb.table('domestic_helpers').insert({
@@ -67,14 +67,30 @@ def lookup_passcode():
         .select('*, helper_flat_links(flat_id, flats(flat_number))')
         .eq('society_id', g.society_id)
         .eq('passcode', passcode)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     if not helper.data:
         return jsonify({'error': 'Unknown passcode'}), 404
-    if helper.data.get('is_blacklisted'):
-        return jsonify({'error': 'Helper is blacklisted', 'helper': helper.data}), 403
-    return jsonify(helper.data)
+    helper_data = helper.data[0]
+    if helper_data.get('is_blacklisted'):
+        return jsonify({'error': 'Helper is blacklisted', 'helper': helper_data}), 403
+    
+    # Check if there's an active entry today (no exit time)
+    today = date.today().isoformat()
+    active_entry = (
+        sb.table('helper_attendance')
+        .select('id, entry_time, flat_id')
+        .eq('helper_id', helper_data['id'])
+        .eq('date', today)
+        .is_('exit_time', 'null')
+        .order('entry_time', desc=True)
+        .limit(1)
+        .execute()
+    )
+    
+    helper_data['active_entry'] = active_entry.data[0] if active_entry.data else None
+    return jsonify(helper_data)
 
 
 @domestic_help_bp.post('/entry')
@@ -85,12 +101,12 @@ def log_entry():
     if not data.get('passcode') or not data.get('flat_id'):
         return jsonify({'error': 'passcode and flat_id required'}), 400
     sb = get_admin_client()
-    helper = sb.table('domestic_helpers').select('id').eq('society_id', g.society_id).eq('passcode', data['passcode']).maybe_single().execute()
+    helper = sb.table('domestic_helpers').select('id').eq('society_id', g.society_id).eq('passcode', data['passcode']).limit(1).execute()
     if not helper.data:
         return jsonify({'error': 'Unknown passcode'}), 404
     now = datetime.now(timezone.utc).isoformat()
     result = sb.table('helper_attendance').insert({
-        'helper_id':  helper.data['id'],
+        'helper_id':  helper.data[0]['id'],
         'flat_id':    data['flat_id'],
         'guard_id':   g.user_id,
         'entry_time': now,

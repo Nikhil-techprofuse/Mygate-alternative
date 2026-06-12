@@ -52,16 +52,18 @@ async function verifyOtp() {
 
 // ── Dashboard ─────────────────────────────────────────────────────────────
 async function loadGuardDashboard() {
-  const [queueRes, alertRes] = await Promise.all([
+  const [queueRes, alertRes, visitorsRes] = await Promise.all([
     apiFetch('/visitors/queue'),
     apiFetch('/security-alerts/?status=sent'),
+    apiFetch('/visitors/'),
   ]);
   const queue  = queueRes.ok  ? await queueRes.json()  : [];
   const alerts = alertRes.ok  ? await alertRes.json()  : [];
+  const visitors = visitorsRes.ok ? await visitorsRes.json() : [];
 
   document.getElementById('guard-stats').innerHTML = `
-    <div class="stat-card" style="background:#1a2942"><div class="stat-val" style="color:#60a5fa">${queue.length}</div><div class="stat-lbl" style="color:#93b4d4">In Queue</div></div>
-    <div class="stat-card" style="background:#1a2942"><div class="stat-val" style="color:var(--danger)">${alerts.length}</div><div class="stat-lbl" style="color:#93b4d4">Alerts</div></div>
+    <div class="stat-card" style="background:var(--card-bg)"><div class="stat-val" style="color:var(--primary)">${queue.length}</div><div class="stat-lbl" style="color:var(--muted)">In Queue</div></div>
+    <div class="stat-card" style="background:var(--card-bg)"><div class="stat-val" style="color:var(--danger)">${alerts.length}</div><div class="stat-lbl" style="color:var(--muted)">Alerts</div></div>
   `;
 
   // Active SOS alerts
@@ -70,17 +72,45 @@ async function loadGuardDashboard() {
       🚨 SOS — ${a.flats?.flat_number || 'Unknown flat'} · Tap to acknowledge
     </div>`).join('');
 
-  // Visitor queue
+  // Pending approvals
   document.getElementById('visitor-queue').innerHTML = queue.length
     ? queue.map(v => `
-      <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #2d3f5e">
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)">
         <div style="flex:1">
           <div style="font-weight:600">${v.visitor_name}</div>
-          <div style="font-size:.8rem;color:#93b4d4">${v.visitor_type} · Flat ${v.flats?.flat_number || '?'} · ${timeAgo(v.entry_time)}</div>
+          <div style="font-size:.8rem;color:var(--muted)">${v.visitor_type} · Flat ${v.flats?.flat_number || '?'} · ${timeAgo(v.entry_time)}</div>
+        </div>
+        <span style="padding:5px 12px;font-size:.8rem;background:var(--card-bg);color:var(--warning);border:1px solid var(--warning);border-radius:4px">⏳ Pending</span>
+      </div>`).join('')
+    : '<p style="color:var(--muted);text-align:center;padding:12px">No pending approvals</p>';
+
+  // Active visitors (approved, not exited yet)
+  const activeVisitors = visitors.filter(v => v.approval_status === 'approved' && !v.exit_time);
+  document.getElementById('active-visitors').innerHTML = activeVisitors.length
+    ? activeVisitors.map(v => `
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)">
+        <div style="flex:1">
+          <div style="font-weight:600">${v.visitor_name}</div>
+          <div style="font-size:.8rem;color:var(--muted)">${v.visitor_type} · Flat ${v.flats?.flat_number || '?'} · ${timeAgo(v.entry_time)}</div>
         </div>
         <button class="btn btn-success" style="padding:5px 12px;font-size:.8rem" onclick="logExitGuard('${v.id}')">Exit</button>
       </div>`).join('')
-    : '<p style="color:#93b4d4;text-align:center;padding:12px">Queue is clear</p>';
+    : '<p style="color:var(--muted);text-align:center;padding:12px">No active visitors</p>';
+
+  // Recent visitor entries (only approved ones)
+  const recentApproved = visitors.filter(v => v.approval_status === 'approved');
+  document.getElementById('recent-visitors').innerHTML = recentApproved.length
+    ? recentApproved.slice(0, 10).map(v => `
+      <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+        <div style="font-weight:600;color:var(--text)">${v.visitor_name}</div>
+        <div style="font-size:.85rem;color:var(--muted);margin-top:4px">
+          📍 Flat ${v.flats?.flat_number || '?'} ${v.visitor_phone ? `· 📱 ${v.visitor_phone}` : ''}
+        </div>
+        <div style="font-size:.8rem;color:var(--muted);margin-top:2px">
+          ⏱ Entry: ${formatDateTime(v.entry_time)}${v.exit_time ? ` · Exit: ${formatDateTime(v.exit_time)}` : ' · <span style="color:var(--warning)">Still inside</span>'}
+        </div>
+      </div>`).join('')
+    : '<p style="color:var(--muted);text-align:center;padding:12px">No visitor entries today</p>';
 
   // Recent vehicle entries
   loadVehicleEntries();
@@ -103,6 +133,9 @@ function subscribeVisitorQueue() {
     .on('postgres_changes', {
       event: 'INSERT', schema: 'public', table: 'visitor_logs',
     }, () => loadGuardDashboard())
+    .on('postgres_changes', {
+      event: 'UPDATE', schema: 'public', table: 'visitor_logs',
+    }, () => loadGuardDashboard())
     .subscribe();
 }
 
@@ -122,12 +155,12 @@ async function verifyVisitorOtp() {
   const data = await res.json();
   if (res.ok) {
     document.getElementById('otp-result').innerHTML = `
-      <div class="card" style="background:#0d3320;border-color:#34a853">
+      <div class="card" style="background:var(--card-bg);border-color:var(--primary);color:var(--text)">
         ✅ <strong>${data.visitor_name}</strong> — Pre-approved for Flat ${data.flat?.flat_number || '?'}
       </div>`;
     document.getElementById('otp-scan-input').value = '';
   } else {
-    document.getElementById('otp-result').innerHTML = `<div class="card" style="background:#3a0d0d;border-color:var(--danger)">❌ ${data.error}</div>`;
+    document.getElementById('otp-result').innerHTML = `<div class="card" style="background:var(--card-bg);border-color:var(--danger);color:var(--text)">❌ ${data.error}</div>`;
   }
 }
 
@@ -136,14 +169,26 @@ let flatsCache = [];
 
 async function loadFlatsList() {
   if (flatsCache.length) return;
-  const res = await apiFetch('/admin/flats');
+  const res = await apiFetch('/auth/resident-flats');
   if (res.ok) {
-    flatsCache = await res.json();
+    const buildings = await res.json();
+    // Flatten occupied flats from grouped structure
+    flatsCache = [];
+    buildings.forEach(b => {
+      b.flats.forEach(f => {
+        flatsCache.push({
+          id: f.id,
+          flat_number: f.flat_number,
+          building_name: b.name
+        });
+      });
+    });
+    
     const sel = document.getElementById('walkin-flat');
     flatsCache.forEach(f => {
       const o = document.createElement('option');
       o.value = f.id;
-      o.textContent = `${f.buildings?.name || ''} - ${f.flat_number}`;
+      o.textContent = `${f.building_name} - ${f.flat_number}`;
       sel.appendChild(o);
     });
     // Kids checkout flat list
@@ -151,7 +196,7 @@ async function loadFlatsList() {
     if (kSel) flatsCache.forEach(f => {
       const o = document.createElement('option');
       o.value = f.id;
-      o.textContent = `${f.buildings?.name || ''} - ${f.flat_number}`;
+      o.textContent = `${f.building_name} - ${f.flat_number}`;
       kSel.appendChild(o);
     });
   }
@@ -167,7 +212,7 @@ async function logWalkin() {
   if (!body.visitor_name || !body.flat_id) return toast('Name and flat required', 'error');
   const res = await apiFetch('/visitors/walkin', { method: 'POST', body: JSON.stringify(body) });
   if (res.ok) {
-    toast('Entry logged — resident notified', 'success');
+    toast('Approval request sent to resident', 'success');
     document.getElementById('walkin-name').value = '';
     document.getElementById('walkin-phone').value = '';
     document.getElementById('walkin-flat').value = '';
@@ -192,13 +237,13 @@ async function lookupPlate() {
   const el   = document.getElementById('plate-result');
   if (data.found) {
     const v = data.vehicle;
-    el.innerHTML = `<div class="card" style="background:#0d3320;border-color:#34a853">
+    el.innerHTML = `<div class="card" style="background:var(--card-bg);border-color:var(--primary);color:var(--text)">
       ✅ <strong>${plate}</strong> — ${v.user_profiles?.full_name || 'Resident'} · Flat ${v.flats?.flat_number || '?'}
-      ${v.make ? '<br><span style="font-size:.85rem;color:#93b4d4">'+v.make+' '+v.model+' · '+v.color+'</span>' : ''}
+      ${v.make ? '<br><span style="font-size:.85rem;color:var(--muted)">'+v.make+' '+v.model+' · '+v.color+'</span>' : ''}
     </div>`;
   } else {
-    el.innerHTML = `<div class="card" style="background:#3a2800;border-color:var(--warning)">
-      ⚠️ Unknown plate — will be logged as visitor vehicle
+    el.innerHTML = `<div class="card" style="background:var(--card-bg);border-color:var(--warning);color:var(--text)">
+      ⚠️ Non-Resident Vehicle — will be logged as visitor vehicle
     </div>`;
   }
 }
@@ -225,13 +270,13 @@ async function logVehicleExitByPlate() {
   const entries = await res.json();
   const open = entries.find(e => e.number_plate === plate && !e.exit_time);
   if (!open) {
-    el.innerHTML = `<div class="card" style="background:#3a2800;border-color:var(--warning)">⚠️ No open entry found for ${plate}</div>`;
+    el.innerHTML = `<div class="card" style="background:var(--card-bg);border-color:var(--warning);color:var(--text)">⚠️ No open entry found for ${plate}</div>`;
     return;
   }
   const exitRes = await apiFetch(`/vehicles/entry/${open.id}/exit`, { method: 'PATCH', body: '{}' });
   if (exitRes.ok) {
     toast(`Exit logged: ${plate}`, 'success');
-    el.innerHTML = `<div class="card" style="background:#0d3320;border-color:#34a853">✅ Exit logged for ${plate}</div>`;
+    el.innerHTML = `<div class="card" style="background:var(--card-bg);border-color:var(--primary);color:var(--text)">✅ Exit logged for ${plate}</div>`;
     document.getElementById('exit-plate-input').value = '';
     loadVehicleEntries();
   } else toast('Failed to log exit', 'error');
@@ -330,16 +375,25 @@ async function lookupHelper() {
     currentHelper = data;
     const flatInfo = (data.helper_flat_links || []).map(l => l.flats?.flat_number).join(', ');
     el.innerHTML = `
-      <div class="card" style="background:#0d3320;border-color:#34a853;display:flex;gap:12px;align-items:center">
+      <div class="card" style="background:var(--card-bg);border:2px solid var(--primary);display:flex;gap:12px;align-items:center">
         <img src="${data.photo_url || 'https://ui-avatars.com/api/?name='+encodeURIComponent(data.name)}" style="width:52px;height:52px;border-radius:50%">
         <div>
-          <div style="font-weight:700">${data.name}</div>
-          <div style="font-size:.85rem;color:#93b4d4">${data.helper_type} · Flat ${flatInfo}</div>
+          <div style="font-weight:700;color:var(--text)">${data.name}</div>
+          <div style="font-size:.85rem;color:var(--muted)">${data.helper_type} · Flat ${flatInfo}</div>
         </div>
       </div>`;
-    document.getElementById('helper-entry-btn').style.display = 'block';
+    
+    const btnContainer = document.getElementById('helper-entry-btn');
+    if (data.active_entry) {
+      // Already entered today, show Exit button
+      btnContainer.innerHTML = '<button class="btn btn-warning btn-full" onclick="logHelperExit()">Log Exit</button>';
+    } else {
+      // No entry today, show Entry button
+      btnContainer.innerHTML = '<button class="btn btn-success btn-full" onclick="logHelperEntry()">✓ Log Entry</button>';
+    }
+    btnContainer.style.display = 'block';
   } else {
-    el.innerHTML = `<div class="card" style="background:#3a0d0d;border-color:var(--danger)">❌ ${data.error || 'Unknown passcode'}</div>`;
+    el.innerHTML = `<div class="card" style="background:var(--card-bg);border:2px solid var(--danger);color:var(--text)">❌ ${data.error || 'Unknown passcode'}</div>`;
     document.getElementById('helper-entry-btn').style.display = 'none';
   }
 }
@@ -361,6 +415,22 @@ async function logHelperEntry() {
   } else toast('Failed to log entry', 'error');
 }
 
+async function logHelperExit() {
+  if (!currentHelper || !currentHelper.active_entry) return;
+  const attendanceId = currentHelper.active_entry.id;
+  const res = await apiFetch(`/domestic-help/attendance/${attendanceId}/exit`, {
+    method: 'PATCH',
+  });
+  if (res.ok) {
+    toast(`Exit logged for ${currentHelper.name}`, 'success');
+    document.getElementById('helper-passcode').value = '';
+    document.getElementById('helper-result').innerHTML = '';
+    document.getElementById('helper-entry-btn').style.display = 'none';
+    currentHelper = null;
+  } else toast('Failed to log exit', 'error');
+}
+
+
 // ── Kids Checkout ─────────────────────────────────────────────────────────
 async function initiateKidsCheckout() {
   const flatId = document.getElementById('kids-flat').value;
@@ -369,7 +439,7 @@ async function initiateKidsCheckout() {
   const data = await res.json();
   if (res.ok) {
     document.getElementById('kids-result').innerHTML = `
-      <div class="card" style="background:#3a2800;border-color:var(--warning)">
+      <div class="card" style="background:var(--card-bg);border-color:var(--warning);color:var(--text)">
         ⏳ Waiting for parent approval (Event ID: ${data.id?.slice(0,8)}...)
       </div>`;
     toast('Request sent to parent', 'success');
@@ -378,16 +448,38 @@ async function initiateKidsCheckout() {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'kids_checkout_events', filter: `id=eq.${data.id}` },
         payload => {
           const status = payload.new.status;
-          const color  = status === 'approved' ? '#0d3320' : '#3a0d0d';
-          const border = status === 'approved' ? '#34a853' : 'var(--danger)';
+          const border = status === 'approved' ? 'var(--primary)' : 'var(--danger)';
           document.getElementById('kids-result').innerHTML = `
-            <div class="card" style="background:${color};border-color:${border}">
+            <div class="card" style="background:var(--card-bg);border-color:${border};color:var(--text)">
               ${status === 'approved' ? '✅ Parent approved — allow exit' : '❌ Parent denied — hold child'}
             </div>`;
           toast(status === 'approved' ? 'Exit approved!' : 'Exit denied!', status === 'approved' ? 'success' : 'error');
         }
       ).subscribe();
   } else {
-    document.getElementById('kids-result').innerHTML = `<div class="card" style="background:#3a0d0d;border-color:var(--danger)">❌ ${data.error}</div>`;
+    document.getElementById('kids-result').innerHTML = `<div class="card" style="background:var(--card-bg);border-color:var(--danger);color:var(--text)">❌ ${data.error}</div>`;
   }
+}
+
+// ── Helper functions ──────────────────────────────────────────────────────
+function formatDateTime(isoString) {
+  if (!isoString) return '';
+  const d = new Date(isoString);
+  const date = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+  const time = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+  return `${date} ${time}`;
+}
+
+function timeAgo(isoString) {
+  if (!isoString) return '';
+  const now = new Date();
+  const then = new Date(isoString);
+  const diffMs = now - then;
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
 }

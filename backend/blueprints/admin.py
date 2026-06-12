@@ -288,16 +288,47 @@ def update_resident(resident_id):
 @require_role('super_admin')
 def delete_resident(resident_id):
     sb = get_admin_client()
-    existing = sb.table('user_profiles').select('id').eq('id', resident_id).eq('society_id', g.society_id).maybe_single().execute()
+    existing = sb.table('user_profiles').select('id, flat_id').eq('id', resident_id).eq('society_id', g.society_id).limit(1).execute()
     if not existing.data:
         return jsonify({'error': 'Resident not found'}), 404
-    # Hard-delete admin-created profiles (no auth login attached)
+
+    flat_id = existing.data[0].get('flat_id')
+
+    # Delete or null-out all FK references before deleting the profile row.
+    # For content created by this user, delete it entirely:
+    _delete_refs = [
+        ('notices',          'posted_by'),
+        ('polls',            'created_by'),
+        ('events',           'created_by'),
+        ('forum_posts',      'posted_by'),
+        ('forum_comments',   'posted_by'),
+        ('ticket_updates',   'updated_by'),
+        ('security_alerts',  'triggered_by'),
+        ('visitor_otps',     'created_by'),
+    ]
+    for table, col in _delete_refs:
+        try:
+            sb.table(table).delete().eq(col, resident_id).execute()
+        except Exception:
+            pass
+
+    # For assigned references, null them out:
     try:
-        sb.table('family_members').delete().eq('flat_id',
-            sb.table('user_profiles').select('flat_id').eq('id', resident_id).maybe_single().execute().data.get('flat_id', '')
-        ).execute()
+        sb.table('helpdesk_tickets').update({'raised_by': None}).eq('raised_by', resident_id).execute()
     except Exception:
         pass
+    try:
+        sb.table('helpdesk_tickets').update({'assigned_to': None}).eq('assigned_to', resident_id).execute()
+    except Exception:
+        pass
+
+    # Delete family members linked to this flat
+    if flat_id:
+        try:
+            sb.table('family_members').delete().eq('flat_id', flat_id).execute()
+        except Exception:
+            pass
+
     sb.table('user_profiles').delete().eq('id', resident_id).execute()
     return jsonify({'deleted': True})
 

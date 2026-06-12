@@ -32,8 +32,8 @@ def create_invite():
         'otp_code':      otp_code,
         'visitor_name':  data['visitor_name'],
         'visitor_phone': data.get('visitor_phone'),
-        'valid_from':    data['valid_from'],
-        'valid_until':   data['valid_until'],
+        'valid_from':    data['valid_from'],    # Frontend sends UTC ISO string
+        'valid_until':   data['valid_until'],   # Frontend sends UTC ISO string
         'is_recurring':  data.get('is_recurring', False),
     }).execute()
 
@@ -66,12 +66,12 @@ def cancel_invite(invite_id):
         sb.table('visitor_otps')
         .select('id, flat_id')
         .eq('id', invite_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     if not row.data:
         return jsonify({'error': 'Invite not found'}), 404
-    if row.data['flat_id'] != g.flat_id:
+    if row.data[0]['flat_id'] != g.flat_id:
         return jsonify({'error': 'Not your invite'}), 403
     sb.table('visitor_otps').delete().eq('id', invite_id).execute()
     return jsonify({'deleted': invite_id})
@@ -91,21 +91,44 @@ def verify_visitor_otp():
     sb = get_admin_client()
     now = datetime.now(timezone.utc).isoformat()
 
-    otp_row = (
+    # First, check if OTP exists at all (for better error messages)
+    otp_check = (
         sb.table('visitor_otps')
-        .select('*, flats(flat_number, building_id)')
+        .select('id, is_used, valid_from, valid_until, flat_id, flats(society_id)')
         .eq('otp_code', otp_code)
-        .eq('is_used', False)
-        .lte('valid_from', now)
-        .gte('valid_until', now)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
 
-    if not otp_row.data:
-        return jsonify({'error': 'Invalid, expired, or already used OTP'}), 404
+    if not otp_check.data:
+        return jsonify({'error': 'Unknown OTP code'}), 404
 
-    invite = otp_row.data
+    otp_info = otp_check.data[0]
+    
+    # Check society match
+    if otp_info.get('flats', {}).get('society_id') != g.society_id:
+        return jsonify({'error': 'OTP belongs to a different society'}), 403
+    
+    # Check if already used
+    if otp_info.get('is_used'):
+        return jsonify({'error': 'OTP already used'}), 400
+    
+    # Check time validity
+    if otp_info.get('valid_from') and otp_info['valid_from'] > now:
+        return jsonify({'error': 'OTP not yet valid'}), 400
+    if otp_info.get('valid_until') and otp_info['valid_until'] < now:
+        return jsonify({'error': 'OTP expired'}), 400
+
+    # Fetch full OTP details
+    otp_row = (
+        sb.table('visitor_otps')
+        .select('*, flats(flat_number, building_id)')
+        .eq('id', otp_info['id'])
+        .limit(1)
+        .execute()
+    )
+
+    invite = otp_row.data[0]
     # Log visitor entry
     log_result = sb.table('visitor_logs').insert({
         'society_id':      g.society_id,

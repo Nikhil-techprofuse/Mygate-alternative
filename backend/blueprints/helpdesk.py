@@ -24,7 +24,7 @@ def create_ticket():
 @require_auth
 def list_tickets():
     sb = get_admin_client()
-    q = sb.table('helpdesk_tickets').select('*, flats(flat_number), user_profiles(full_name)')
+    q = sb.table('helpdesk_tickets').select('*, flats(flat_number), assigned_to_user:user_profiles!helpdesk_tickets_assigned_to_fkey(full_name), raised_by_user:user_profiles!helpdesk_tickets_raised_by_fkey(full_name)')
     if g.role in ('resident', 'tenant'):
         q = q.eq('flat_id', g.flat_id)
     else:

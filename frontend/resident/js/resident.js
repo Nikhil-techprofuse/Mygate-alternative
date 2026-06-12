@@ -2,14 +2,117 @@
 
 // ── Boot ──────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  if (Auth.isLoggedIn()) showApp();
+  if (Auth.isLoggedIn()) showFlatSelection();
 });
 
-function showApp() {
-  document.getElementById('login-screen').style.display = 'none';
+let _flatSelectionProfile = null;
+
+function showFlatSelection() {
+  // Fetch profile and populate building/flat selectors.
+  apiFetch('/auth/me').then(async res => {
+    if (!res.ok) {
+      toast('Failed to load profile', 'error');
+      Auth.clear();
+      location.reload();
+      return;
+    }
+    _flatSelectionProfile = await res.json();
+
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('flat-selection-screen').style.display = 'flex';
+    await loadFlatSelectionOptions();
+  }).catch(e => {
+    toast('Error: ' + e.message, 'error');
+    Auth.clear();
+    location.reload();
+  });
+}
+
+let _residentFlatData = []; // [{id, name, flats:[{id, flat_number}]}]
+
+async function loadFlatSelectionOptions() {
+  const bSel = document.getElementById('flat-sel-building');
+  const fSel = document.getElementById('flat-sel-flatno');
+  const hint = document.getElementById('flat-sel-hint');
+
+  const [bRes, rfRes] = await Promise.all([
+    apiFetch('/admin/buildings'),
+    apiFetch('/auth/resident-flats'),
+  ]);
+  const buildings = bRes.ok ? await bRes.json() : [];
+  const residentFlats = rfRes.ok ? await rfRes.json() : [];
+
+  // Build a map: building_id -> [flats with residents]
+  const flatsByBuilding = {};
+  residentFlats.forEach(b => { flatsByBuilding[b.id] = b.flats; });
+
+  // Store for later use
+  _residentFlatData = buildings.map(b => ({
+    id: b.id, name: b.name,
+    flats: flatsByBuilding[b.id] || []
+  }));
+
+  bSel.innerHTML = '<option value="">Select building</option>';
+  _residentFlatData.forEach(b => {
+    bSel.insertAdjacentHTML('beforeend', `<option value="${b.id}">${b.name}</option>`);
+  });
+
+  const currentBuildingId = _flatSelectionProfile?.flats?.building_id || '';
+  const currentFlatId     = _flatSelectionProfile?.flat_id || '';
+  if (currentBuildingId) {
+    bSel.value = currentBuildingId;
+    await _loadAndRenderFlatOptions(currentBuildingId, currentFlatId);
+  } else {
+    fSel.innerHTML = '<option value="">Select flat number</option>';
+    hint.textContent = buildings.length ? 'Choose building first.' : 'No buildings found. Contact admin.';
+  }
+}
+
+async function _loadAndRenderFlatOptions(buildingId, selectedFlatId = '') {
+  const fSel = document.getElementById('flat-sel-flatno');
+  const hint = document.getElementById('flat-sel-hint');
+  if (!buildingId) {
+    fSel.innerHTML = '<option value="">Select flat number</option>';
+    hint.textContent = 'Choose building first, then flat number.';
+    return;
+  }
+  const building = _residentFlatData.find(b => b.id === buildingId);
+  const flats = building ? building.flats : [];
+  fSel.innerHTML = '<option value="">Select flat number</option>';
+  flats.forEach(fl => {
+    fSel.insertAdjacentHTML('beforeend', `<option value="${fl.id}">${fl.flat_number}</option>`);
+  });
+  if (selectedFlatId) fSel.value = selectedFlatId;
+  hint.textContent = flats.length ? `${flats.length} flat(s) available` : 'No registered flats in this building. Contact admin.';
+}
+
+function onFlatBuildingChange() {
+  const buildingId = document.getElementById('flat-sel-building').value;
+  _loadAndRenderFlatOptions(buildingId);
+}
+
+async function confirmFlatSelection() {
+  const flatId = document.getElementById('flat-sel-flatno').value;
+  if (!flatId) return toast('Please select a flat number', 'error');
+
+  const saveRes = await apiFetch('/auth/select-flat', {
+    method: 'POST',
+    body: JSON.stringify({ flat_id: flatId }),
+  });
+  if (!saveRes.ok) {
+    const e = await saveRes.json();
+    return toast(e.error || 'Failed to set selected flat', 'error');
+  }
+
+  localStorage.setItem((window.MG_PORTAL || 'mg') + '_flat_id', flatId);
+  document.getElementById('flat-selection-screen').style.display = 'none';
   document.getElementById('app-shell').style.display = 'block';
   loadDashboard();
   subscribeVisitorApprovals();
+}
+
+function showApp() {
+  showFlatSelection();
 }
 
 function resetLogin() {
@@ -57,7 +160,7 @@ async function verifyOtp() {
       return toast('Access denied — use the correct portal for your role', 'error');
     }
     Auth.save(data);
-    showApp();
+    showFlatSelection();
   } else {
     const e = await res.json();
     toast(e.error || 'Invalid OTP', 'error');
@@ -66,6 +169,11 @@ async function verifyOtp() {
 
 // ── Dashboard ─────────────────────────────────────────────────────────────
 let _myProfile = {};
+
+// ── Flat helper ───────────────────────────────────────────────────────────
+function getFlatId() {
+  return Auth.userId ? localStorage.getItem((window.MG_PORTAL || 'mg') + '_flat_id') : null;
+}
 
 async function loadDashboard() {
   const [profRes, visRes, delRes] = await Promise.all([
@@ -103,17 +211,37 @@ function openInviteModal() {
     ? (flat.buildings?.name ? `${flat.buildings.name} – ${flat.flat_number}` : flat.flat_number)
     : 'Your flat';
   document.getElementById('inv-flat-display').value = label;
+  
+  // Pre-fill valid_from with current LOCAL time, valid_until with +24 hours LOCAL time
+  const now = new Date();
+  const tomorrow = new Date(now.getTime() + 24*60*60*1000);
+  
+  // Format for datetime-local input (YYYY-MM-DDTHH:MM in local timezone)
+  const formatLocal = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  };
+  
+  document.getElementById('inv-from').value = formatLocal(now);
+  document.getElementById('inv-until').value = formatLocal(tomorrow);
+  
   openModal('modal-invite');
 }
 
 // ── Visitor approval (realtime) ───────────────────────────────────────────
 function subscribeVisitorApprovals() {
+  const flatId = getFlatId();
+  if (!flatId) return;
   sb.channel('visitor-approvals')
     .on('postgres_changes', {
       event: 'INSERT',
       schema: 'public',
       table: 'visitor_logs',
-      filter: `flat_id=eq.${localStorage.getItem('mg_flat_id')}`,
+      filter: `flat_id=eq.${flatId}`,
     }, payload => {
       const v = payload.new;
       if (v.approval_status === 'pending') {
@@ -233,6 +361,11 @@ async function createInvite() {
   };
   if (!body.visitor_name || !body.valid_from || !body.valid_until)
     return toast('Fill all required fields', 'error');
+  
+  // Convert local datetime strings to UTC ISO format for backend
+  body.valid_from = new Date(body.valid_from).toISOString();
+  body.valid_until = new Date(body.valid_until).toISOString();
+  
   const res = await apiFetch('/visitors/invite', { method: 'POST', body: JSON.stringify(body) });
   if (res.ok) {
     const d = await res.json();

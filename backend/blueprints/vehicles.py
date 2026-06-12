@@ -64,7 +64,7 @@ def add_vehicle():
 @require_auth
 @require_role('guard', 'super_admin', 'committee_member')
 def lookup_plate():
-    """Guard lookups a number plate — returns owner or flags as unknown."""
+    """Guard looks up a number plate — returns owner info or flags as non-resident vehicle."""
     plate = (request.get_json(silent=True) or {}).get('number_plate', '').upper().strip()
     if not plate:
         return jsonify({'error': 'number_plate required'}), 400
@@ -74,12 +74,12 @@ def lookup_plate():
         .select('*, flats(flat_number), user_profiles(full_name, phone)')
         .eq('number_plate', plate)
         .eq('society_id', g.society_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if result.data:
-        return jsonify({'found': True, 'vehicle': result.data})
-    return jsonify({'found': False, 'message': 'Unrecognised plate — treat as visitor vehicle'})
+    if result.data and len(result.data) > 0:
+        return jsonify({'found': True, 'vehicle': result.data[0]})
+    return jsonify({'found': False, 'message': 'Non-resident vehicle — will be logged as visitor vehicle'})
 
 
 @vehicles_bp.post('/entry')
@@ -93,16 +93,17 @@ def log_entry():
     sb = get_admin_client()
     vehicle = (
         sb.table('vehicles').select('id').eq('number_plate', plate)
-        .eq('society_id', g.society_id).maybe_single().execute()
+        .eq('society_id', g.society_id).limit(1).execute()
     )
+    vehicle_id = vehicle.data[0]['id'] if (vehicle.data and len(vehicle.data) > 0) else None
     now = datetime.now(timezone.utc).isoformat()
     entry = sb.table('vehicle_entry_logs').insert({
         'society_id':        g.society_id,
         'gate_id':           data.get('gate_id'),
         'guard_id':          g.user_id,
-        'vehicle_id':        vehicle.data['id'] if vehicle.data else None,
+        'vehicle_id':        vehicle_id,
         'number_plate':      plate,
-        'is_visitor_vehicle': vehicle.data is None,
+        'is_visitor_vehicle': vehicle_id is None,
         'entry_time':        now,
     }).execute()
     return jsonify(entry.data[0]), 201

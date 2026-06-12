@@ -56,8 +56,16 @@
       <div id="active-alerts"></div>
       <div class="stats-grid" id="guard-stats" style="margin-bottom:12px"></div>
       <div class="card">
-        <div class="card-header">⏳ Visitor Queue</div>
+        <div class="card-header">⏳ Pending Approvals</div>
         <div id="visitor-queue"></div>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <div class="card-header">✅ Active Visitors (Approved)</div>
+        <div id="active-visitors"></div>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <div class="card-header">👥 Recent Visitor Entries</div>
+        <div id="recent-visitors"></div>
       </div>
       <div class="card" style="margin-top:12px">
         <div class="card-header">🚗 Recent Vehicle Entries</div>
@@ -95,7 +103,7 @@
             <option value="cab">Cab / Ride-share</option>
           </select>
         </div>
-        <button class="btn btn-primary btn-full" onclick="logWalkin()">Log Entry & Notify Resident</button>
+        <button class="btn btn-primary btn-full" onclick="logWalkin()">Request Entry Approval</button>
       </div>
     </div>
 

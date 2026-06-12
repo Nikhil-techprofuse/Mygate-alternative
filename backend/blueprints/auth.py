@@ -208,3 +208,89 @@ def update_me():
         .execute()
     )
     return jsonify(result.data[0] if result.data else {})
+
+
+@auth_bp.post('/select-flat')
+@require_auth
+def select_flat():
+    """Set the current user's flat assignment from admin-created flats."""
+    data = request.get_json(silent=True) or {}
+    flat_id = data.get('flat_id')
+    if not flat_id:
+        return jsonify({'error': 'flat_id is required'}), 400
+
+    sb = get_admin_client()
+    flat = (
+        sb.table('flats')
+        .select('id, society_id')
+        .eq('id', flat_id)
+        .eq('society_id', g.society_id)
+        .limit(1)
+        .execute()
+    )
+    if not flat.data:
+        return jsonify({'error': 'Flat not found in your society'}), 404
+
+    updated = (
+        sb.table('user_profiles')
+        .update({'flat_id': flat_id})
+        .eq('id', g.user_id)
+        .execute()
+    )
+    return jsonify(updated.data[0] if updated.data else {'updated': True})
+
+
+@auth_bp.get('/resident-flats')
+@require_auth
+def resident_flats():
+    """Return buildings+flats that have at least one registered resident.
+    Scopes flats by society (via flats.society_id) then checks user_profiles
+    without re-filtering by society so admin-created profiles always appear."""
+    sb = get_admin_client()
+
+    # Step 1: all flats in this society with building info
+    all_flats_q = (
+        sb.table('flats')
+        .select('id, flat_number, building_id, buildings(id, name)')
+        .eq('society_id', g.society_id)
+        .execute()
+    )
+    all_flats = all_flats_q.data or []
+    if not all_flats:
+        return jsonify([])
+
+    all_flat_ids = [f['id'] for f in all_flats]
+
+    # Step 2: which of those flat_ids have at least one resident profile
+    # (no society_id filter here — admin-created profiles may have different mapping)
+    # Supabase .in_() max 1000; chunk if needed
+    occupied = set()
+    chunk_size = 200
+    for i in range(0, len(all_flat_ids), chunk_size):
+        chunk = all_flat_ids[i:i+chunk_size]
+        rows = (
+            sb.table('user_profiles')
+            .select('flat_id')
+            .in_('flat_id', chunk)
+            .in_('role', ['resident', 'tenant', 'committee_member'])
+            .execute()
+        )
+        for r in (rows.data or []):
+            if r.get('flat_id'):
+                occupied.add(r['flat_id'])
+
+    # Step 3: group occupied flats by building
+    buildings = {}
+    for f in all_flats:
+        if f['id'] not in occupied:
+            continue
+        b = f.get('buildings') or {}
+        bid = b.get('id') or f['building_id']
+        if bid not in buildings:
+            buildings[bid] = {'id': bid, 'name': b.get('name', '—'), 'flats': []}
+        buildings[bid]['flats'].append({'id': f['id'], 'flat_number': f['flat_number']})
+
+    result = sorted(buildings.values(), key=lambda x: x['name'])
+    for bldg in result:
+        bldg['flats'].sort(key=lambda x: x['flat_number'])
+    return jsonify(result)
