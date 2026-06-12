@@ -60,7 +60,7 @@
       <p style="margin-bottom:16px;color:var(--muted);font-size:.9rem">Enter the 6-digit OTP sent to <strong id="otp-phone-display"></strong></p>
       <div class="form-group">
         <label>OTP</label>
-        <input id="inp-otp" class="form-control" type="number" placeholder="_ _ _ _ _ _" maxlength="6">
+        <input id="inp-otp" class="form-control" type="text" placeholder="_ _ _ _ _ _" maxlength="6" pattern="[0-9]*" inputmode="numeric">
       </div>
       <button class="btn btn-primary btn-full btn-lg" onclick="verifyOtp()">Verify & Login</button>
       <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="resetLogin()">← Change number</button>

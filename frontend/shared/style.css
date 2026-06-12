@@ -1,11 +1,26 @@
 /* ── MyGate Design System ──────────────────────────────────────────── */
+/* 
+ * THEME-AWARE STYLING GUIDELINES:
+ * - Always use CSS variables (--var-name) instead of hardcoded colors
+ * - For text: use --text (primary), --muted (secondary)
+ * - For backgrounds: use --bg, --card-bg, --surface, --input-bg
+ * - For interactive states: use --hover-bg
+ * - For code badges/highlights: use --code-badge-bg and --code-badge-text
+ * - These variables automatically adapt to light/dark theme
+ * - NEVER use hardcoded colors like #ffffff, #000000, white, or black in inline styles
+ */
 :root {
   /* Brand */
   --primary:    #1a73e8;
   --primary-dk: #1557b0;
+  --accent:     #0d47a1;
   --success:    #34a853;
   --danger:     #ea4335;
   --warning:    #fbbc04;
+  
+  /* Code badge styling for light theme - dark text on light bg */
+  --code-badge-bg: #e8f0fe;
+  --code-badge-text: #1557b0;
 
   /* Light theme surfaces */
   --bg:         #f5f7fa;
@@ -42,6 +57,7 @@
 [data-theme="dark"] {
   --primary:    #60a5fa;
   --primary-dk: #3b82f6;
+  --accent:     #1a3a6b;
 
   --bg:         #0d1b2a;
   --card-bg:    #1a2942;
@@ -54,6 +70,10 @@
   --border:     #2d3f5e;
 
   --shadow:     0 2px 12px rgba(0,0,0,.4);
+  
+  /* Code badge styling for dark theme - white text on gradient bg */
+  --code-badge-bg: linear-gradient(135deg, #3b82f6 0%, #1a3a6b 100%);
+  --code-badge-text: #ffffff;
 
   --login-gradient: linear-gradient(135deg, #0d1b2a 0%, #1a3a6b 100%);
   --sidebar-active-bg: rgba(96,165,250,.15);
@@ -293,4 +313,15 @@ select.form-control {
 /* But don't animate transforms/sizes (hurts UX) */
 .btn, .modal-overlay, .page, .toast { transition: none; }
 .btn { transition: background .2s, transform .1s; }
+
+/* ── Remove number input spinners (never show increment/decrement) ── */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
 

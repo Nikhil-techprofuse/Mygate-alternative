@@ -109,6 +109,7 @@ async function confirmFlatSelection() {
   document.getElementById('app-shell').style.display = 'block';
   loadDashboard();
   subscribeVisitorApprovals();
+  subscribeDeliveryUpdates();
 }
 
 function showApp() {
@@ -194,15 +195,25 @@ async function loadDashboard() {
     document.getElementById('kids-checkout-toggle').checked = _myProfile.kids_checkout_enabled;
   }
 
-  document.getElementById('dashboard-stats').innerHTML = `
-    <div class="stat-card"><div class="stat-val">${visitors.filter(v=>v.approval_status==='pending').length}</div><div class="stat-lbl">Pending</div></div>
-    <div class="stat-card"><div class="stat-val">${deliveries.length}</div><div class="stat-lbl">Deliveries</div></div>
-  `;
+  const pendingDeliveries = deliveries.filter(d => d.status === 'arrived');
+  const gateDeliveries = deliveries.filter(d => d.status === 'left_at_gate' && !d.parcel_otp_used);
+  
+  // Stats cards removed per user request
 
   const pending = visitors.filter(v => v.approval_status === 'pending');
   document.getElementById('pending-visitors').innerHTML = pending.length
     ? pending.map(v => visitorCard(v, true)).join('')
-    : '<p style="color:var(--muted);font-size:.9rem;text-align:center;padding:12px">No pending approvals</p>';
+    : '<p style="color:var(--muted);font-size:.9rem;text-align:center;padding:12px">No pending visitors</p>';
+  
+  // Pending deliveries
+  document.getElementById('pending-deliveries').innerHTML = pendingDeliveries.length
+    ? pendingDeliveries.map(d => deliveryCard(d, true)).join('')
+    : '<p style="color:var(--muted);font-size:.9rem;text-align:center;padding:12px">No pending deliveries</p>';
+  
+  // Left at gate deliveries with OTP
+  document.getElementById('gate-deliveries').innerHTML = gateDeliveries.length
+    ? gateDeliveries.map(d => deliveryOTPCard(d)).join('')
+    : '<p style="color:var(--muted);font-size:.9rem;text-align:center;padding:12px">No deliveries left at gate</p>';
 }
 
 function openInviteModal() {
@@ -248,6 +259,34 @@ function subscribeVisitorApprovals() {
         toast(`Visitor at gate: ${v.visitor_name}`, 'info');
         loadDashboard();
       }
+    })
+    .subscribe();
+}
+
+// ── Delivery updates (realtime) ───────────────────────────────────────────
+function subscribeDeliveryUpdates() {
+  const flatId = getFlatId();
+  if (!flatId) return;
+  sb.channel('delivery-updates')
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'deliveries',
+      filter: `flat_id=eq.${flatId}`,
+    }, payload => {
+      const d = payload.new;
+      if (d.status === 'arrived') {
+        toast(`📦 Delivery arrived at gate!`, 'info');
+        loadDashboard();
+      }
+    })
+    .on('postgres_changes', {
+      event: 'UPDATE',
+      schema: 'public',
+      table: 'deliveries',
+      filter: `flat_id=eq.${flatId}`,
+    }, payload => {
+      loadDashboard();
     })
     .subscribe();
 }
@@ -381,6 +420,103 @@ async function createInvite() {
   }
 }
 
+// ── Delivery approval functions ──────────────────────────────────────────
+let _currentDeliveryId = null;
+
+async function approveDelivery(deliveryId, decision) {
+  if (decision === 'leave_at_gate') {
+    // Show OTP input modal
+    _currentDeliveryId = deliveryId;
+    document.getElementById('delivery-otp-input').value = '';
+    openModal('modal-delivery-otp');
+    return;
+  }
+  
+  const res = await apiFetch(`/delivery/${deliveryId}/decide`, {
+    method: 'PATCH',
+    body: JSON.stringify({ decision }),
+  });
+  
+  if (res.ok) {
+    if (decision === 'accept') {
+      toast('Delivery approved! Guard will allow entry.', 'success');
+    } else if (decision === 'reject') {
+      toast('Delivery rejected and returned.', 'error');
+    }
+    loadDashboard();
+  } else {
+    const err = await res.json();
+    toast(err.error || 'Failed to process', 'error');
+  }
+}
+
+async function confirmLeaveAtGate() {
+  const otp = document.getElementById('delivery-otp-input').value.trim();
+  
+  if (!otp) {
+    return toast('Please enter a collection code', 'error');
+  }
+  
+  const res = await apiFetch(`/delivery/${_currentDeliveryId}/decide`, {
+    method: 'PATCH',
+    body: JSON.stringify({ decision: 'leave_at_gate', otp: otp }),
+  });
+  
+  if (res.ok) {
+    closeModal('modal-delivery-otp');
+    toast(`Left at gate! Code: ${otp}`, 'success');
+    loadDashboard();
+  } else {
+    const err = await res.json();
+    toast(err.error || 'Failed to process', 'error');
+  }
+}
+
+function deliveryCard(d, withActions = false) {
+  const company = d.delivery_platforms?.name || 'Delivery';
+  const type = d.delivery_type || 'standard';
+  const time = timeAgo(d.entry_time);
+  
+  return `
+    <div class="visitor-card" style="border-left:4px solid var(--warning)">
+      <div style="font-size:2rem;margin-right:12px">📦</div>
+      <div class="visitor-info" style="flex:1">
+        <div class="visitor-name">${company}</div>
+        <div class="visitor-meta">${type}${d.tracking_id ? ' · ' + d.tracking_id : ''} · ${time}</div>
+        <div>${statusBadge(d.status)}</div>
+      </div>
+      ${withActions && d.status === 'arrived' ? `
+      <div class="visitor-actions" style="flex-direction:column;gap:4px;min-width:140px">
+        <button class="btn btn-success" style="padding:6px 12px;font-size:.85rem;width:100%" onclick="approveDelivery('${d.id}','accept')">✓ Accept</button>
+        <button class="btn btn-warning" style="padding:6px 12px;font-size:.85rem;width:100%" onclick="approveDelivery('${d.id}','leave_at_gate')">📍 Leave at Gate</button>
+        <button class="btn btn-danger" style="padding:6px 12px;font-size:.85rem;width:100%" onclick="approveDelivery('${d.id}','reject')">✗ Reject</button>
+      </div>` : ''}
+    </div>`;
+}
+
+function deliveryOTPCard(d) {
+  const company = d.delivery_platforms?.name || 'Delivery';
+  
+  return `
+    <div class="card" style="margin-bottom:12px;border-left:4px solid var(--primary)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div>
+          <strong style="font-size:1.05rem">${company}</strong>
+          <div style="font-size:.8rem;color:var(--muted);margin-top:2px">${d.tracking_id || 'No tracking ID'}</div>
+        </div>
+        <span class="badge badge-warning">Left at Gate</span>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:.75rem;color:var(--muted);margin-bottom:4px">COLLECTION CODE</div>
+        <div style="font-size:2rem;font-weight:800;letter-spacing:6px;color:var(--primary)">${d.parcel_otp}</div>
+        <button class="btn btn-ghost" style="margin-top:6px;padding:4px 12px;font-size:.8rem" onclick="navigator.clipboard.writeText('${d.parcel_otp}').then(()=>toast('Code copied!','success'))">📋 Copy Code</button>
+      </div>
+      <div style="margin-top:8px;font-size:.8rem;color:var(--muted)">
+        Left at: ${fmtDate(d.exit_time)} · Show this code to guard for collection
+      </div>
+    </div>`;
+}
+
 // ── Deliveries ────────────────────────────────────────────────────────────
 async function loadDeliveries() {
   const res = await apiFetch('/delivery/');
@@ -388,13 +524,13 @@ async function loadDeliveries() {
   const data = await res.json();
   document.getElementById('delivery-list').innerHTML = data.length
     ? `<div class="table-wrap"><table>
-        <thead><tr><th>Company</th><th>Type</th><th>Status</th><th>Time</th></tr></thead>
+        <thead><tr><th>Company</th><th>Type</th><th>Status</th><th>Time</th><th>OTP</th></tr></thead>
         <tbody>${data.map(d => `<tr>
-          <td>${d.delivery_platforms?.name || d.tracking_id || '—'}</td>
+          <td><strong>${d.delivery_platforms?.name || '—'}</strong><br><small style="color:var(--muted)">${d.tracking_id || ''}</small></td>
           <td>${d.delivery_type}</td>
           <td>${statusBadge(d.status)}</td>
           <td>${fmtDate(d.entry_time)}</td>
-          ${d.status === 'arrived' ? `<td><button class="btn btn-success" style="padding:4px 10px" onclick="allowDelivery('${d.id}')">Allow</button></td>` : '<td></td>'}
+          <td>${d.parcel_otp && !d.parcel_otp_used ? `<strong style="color:var(--primary);font-size:1.1rem;letter-spacing:2px">${d.parcel_otp}</strong>` : '—'}</td>
         </tr>`).join('')}</tbody>
       </table></div>`
     : '<p style="color:var(--muted);text-align:center;padding:20px">No deliveries</p>';

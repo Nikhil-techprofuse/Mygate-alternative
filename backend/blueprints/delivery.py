@@ -2,7 +2,6 @@ from flask import Blueprint, request, jsonify, g
 from datetime import datetime, timezone
 from ..supabase_client import get_admin_client
 from ..utils.auth_middleware import require_auth, require_role
-from ..utils.otp import generate_numeric_otp
 
 delivery_bp = Blueprint('delivery', __name__)
 
@@ -24,35 +23,92 @@ def log_delivery():
     if not flat.data:
         return jsonify({'error': 'Flat not found'}), 404
 
-    leave_at_gate = data.get('leave_at_gate', False)
-    parcel_otp    = generate_numeric_otp(6) if leave_at_gate else None
+    # Handle platform - can be ID or name
+    platform_id = data.get('platform_id')
+    platform_name = data.get('platform_name', '').strip()
+    
+    # If platform_name is provided, try to find or create platform
+    if platform_name and not platform_id:
+        # Try to find existing platform by name
+        existing = sb.table('delivery_platforms').select('id').eq('society_id', g.society_id).ilike('name', platform_name).limit(1).execute()
+        if existing.data:
+            platform_id = existing.data[0]['id']
+        else:
+            # Create new platform entry
+            new_platform = sb.table('delivery_platforms').insert({
+                'society_id': g.society_id,
+                'name': platform_name,
+            }).execute()
+            platform_id = new_platform.data[0]['id'] if new_platform.data else None
 
     result = sb.table('deliveries').insert({
         'society_id':       g.society_id,
         'flat_id':          data['flat_id'],
         'gate_id':          data.get('gate_id'),
         'guard_id':         g.user_id,
-        'platform_id':      data.get('platform_id'),
+        'platform_id':      platform_id,
         'tracking_id':      data.get('tracking_id'),
         'package_photo_url': data.get('package_photo_url'),
         'delivery_type':    data.get('delivery_type', 'standard'),
-        'leave_at_gate':    leave_at_gate,
-        'parcel_otp':       parcel_otp,
         'status':           'arrived',
         'entry_time':       now,
     }).execute()
 
-    return jsonify({
-        'delivery': result.data[0],
-        'parcel_otp': parcel_otp,  # shown to guard for left-at-gate flows
-    }), 201
+    return jsonify({'delivery': result.data[0]}), 201
+
+
+@delivery_bp.patch('/<delivery_id>/decide')
+@require_auth
+@require_role('resident', 'tenant')
+def resident_decision(delivery_id):
+    """Resident makes decision: accept, reject, or leave_at_gate."""
+    data = request.get_json(silent=True) or {}
+    decision = data.get('decision')  # 'accept', 'reject', 'leave_at_gate'
+    
+    if decision not in ('accept', 'reject', 'leave_at_gate'):
+        return jsonify({'error': "decision must be 'accept', 'reject', or 'leave_at_gate'"}), 400
+    
+    sb = get_admin_client()
+    d = sb.table('deliveries').select('flat_id, status').eq('id', delivery_id).single().execute()
+    if not d.data or d.data['flat_id'] != g.flat_id:
+        return jsonify({'error': 'Not found or not your delivery'}), 403
+    
+    if d.data['status'] != 'arrived':
+        return jsonify({'error': 'Delivery already processed'}), 409
+    
+    updates = {}
+    parcel_otp = None
+    
+    if decision == 'accept':
+        updates['status'] = 'allowed_in'
+    elif decision == 'reject':
+        updates['status'] = 'rejected'
+        updates['exit_time'] = datetime.now(timezone.utc).isoformat()
+    elif decision == 'leave_at_gate':
+        # Resident must provide OTP/Code
+        parcel_otp = data.get('otp', '').strip()
+        if not parcel_otp:
+            return jsonify({'error': 'Collection code is required'}), 400
+        
+        updates['status'] = 'left_at_gate'
+        updates['leave_at_gate'] = True
+        updates['parcel_otp'] = parcel_otp
+        updates['exit_time'] = datetime.now(timezone.utc).isoformat()
+    
+    sb.table('deliveries').update(updates).eq('id', delivery_id).execute()
+    
+    response = {'status': updates['status']}
+    if parcel_otp:
+        response['parcel_otp'] = parcel_otp
+    
+    return jsonify(response)
 
 
 @delivery_bp.patch('/<delivery_id>/allow')
 @require_auth
 @require_role('resident', 'tenant')
 def allow_entry(delivery_id):
-    """Resident approves delivery entry."""
+    """Resident approves delivery entry (legacy endpoint)."""
     sb = get_admin_client()
     d = sb.table('deliveries').select('flat_id').eq('id', delivery_id).single().execute()
     if not d.data or d.data['flat_id'] != g.flat_id:
@@ -71,28 +127,23 @@ def log_delivery_exit(delivery_id):
     return jsonify({'exit_time': now})
 
 
-@delivery_bp.post('/<delivery_id>/collect')
+@delivery_bp.post('/<delivery_id>/mark-collected')
 @require_auth
 @require_role('guard')
-def collect_parcel(delivery_id):
-    """Guard verifies OTP and marks parcel as collected."""
-    otp = (request.get_json(silent=True) or {}).get('otp', '').strip()
-    if not otp:
-        return jsonify({'error': 'otp required'}), 400
-    sb  = get_admin_client()
-    d   = sb.table('deliveries').select('parcel_otp, parcel_otp_used').eq('id', delivery_id).single().execute()
+def mark_collected(delivery_id):
+    """Guard marks a left-at-gate delivery as collected/picked up."""
+    sb = get_admin_client()
+    d = sb.table('deliveries').select('id, status').eq('id', delivery_id).eq('society_id', g.society_id).maybe_single().execute()
     if not d.data:
         return jsonify({'error': 'Delivery not found'}), 404
-    if d.data['parcel_otp_used']:
-        return jsonify({'error': 'OTP already used'}), 409
-    if d.data['parcel_otp'] != otp:
-        return jsonify({'error': 'Invalid OTP'}), 401
+    
     now = datetime.now(timezone.utc).isoformat()
     sb.table('deliveries').update({
+        'status': 'collected',
+        'collected_at': now,
         'parcel_otp_used': True,
-        'collected_at':    now,
-        'status':          'collected',
     }).eq('id', delivery_id).execute()
+    
     return jsonify({'status': 'collected', 'collected_at': now})
 
 
@@ -100,7 +151,7 @@ def collect_parcel(delivery_id):
 @require_auth
 def list_deliveries():
     sb = get_admin_client()
-    q  = sb.table('deliveries').select('*, flats(flat_number), delivery_platforms(name)')
+    q  = sb.table('deliveries').select('id, society_id, flat_id, gate_id, guard_id, platform_id, tracking_id, package_photo_url, delivery_type, status, entry_time, exit_time, collected_at, leave_at_gate, parcel_otp, parcel_otp_used, flats(flat_number), delivery_platforms(name)')
     if g.role in ('resident', 'tenant'):
         q = q.eq('flat_id', g.flat_id)
     else:

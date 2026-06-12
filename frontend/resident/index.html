@@ -35,7 +35,7 @@
       <p style="margin-bottom:16px;color:var(--muted);font-size:.9rem">Enter the 6-digit OTP sent to <strong id="otp-phone-display"></strong></p>
       <div class="form-group">
         <label>OTP</label>
-        <input id="inp-otp" class="form-control" type="number" placeholder="_ _ _ _ _ _" maxlength="6">
+        <input id="inp-otp" class="form-control" type="text" placeholder="_ _ _ _ _ _" maxlength="6" pattern="[0-9]*" inputmode="numeric">
       </div>
       <button class="btn btn-primary btn-full btn-lg" onclick="verifyOtp()">Verify & Login</button>
       <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="resetLogin()">← Change number</button>
@@ -79,7 +79,6 @@
 
     <!-- Dashboard -->
     <div id="page-dashboard" class="page active" style="padding:16px">
-      <div class="stats-grid" id="dashboard-stats"></div>
 
       <!-- SOS -->
       <div style="text-align:center;margin:16px 0">
@@ -87,10 +86,22 @@
         <p style="font-size:.75rem;color:var(--muted);margin-top:6px">Tap for emergency help</p>
       </div>
 
-      <!-- Pending approvals -->
+      <!-- Pending Visitors -->
       <div class="card">
-        <div class="card-header">⏳ Pending Approvals</div>
+        <div class="card-header">👤 Pending Visitors</div>
         <div id="pending-visitors"></div>
+      </div>
+
+      <!-- Pending Deliveries -->
+      <div class="card" style="margin-top:12px">
+        <div class="card-header">📦 Pending Deliveries</div>
+        <div id="pending-deliveries"></div>
+      </div>
+
+      <!-- Completed Deliveries with OTP -->
+      <div class="card" style="margin-top:12px">
+        <div class="card-header">🔑 Left at Gate (OTP Required)</div>
+        <div id="gate-deliveries"></div>
       </div>
     </div>
 
@@ -241,6 +252,21 @@
       </select>
     </div>
     <button class="btn btn-primary btn-full" onclick="addVehicle()">Register Vehicle</button>
+  </div>
+</div>
+
+<div id="modal-delivery-otp" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-delivery-otp')">
+  <div class="modal-box">
+    <div class="modal-title">📍 Leave at Gate</div>
+    <p style="color:var(--muted);margin-bottom:16px;font-size:.9rem">Enter a collection code/OTP. Share this with whoever will collect the parcel from the gate.</p>
+    <div class="form-group">
+      <label>Collection Code *</label>
+      <input id="delivery-otp-input" class="form-control" type="text" placeholder="Enter your code" style="text-align:center;letter-spacing:3px;font-size:1.2rem;font-weight:600">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-warning btn-full" onclick="confirmLeaveAtGate()">Confirm & Leave at Gate</button>
+      <button class="btn btn-ghost btn-full" onclick="closeModal('modal-delivery-otp')">Cancel</button>
+    </div>
   </div>
 </div>
 

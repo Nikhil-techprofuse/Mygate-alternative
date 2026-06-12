@@ -61,10 +61,7 @@ async function loadGuardDashboard() {
   const alerts = alertRes.ok  ? await alertRes.json()  : [];
   const visitors = visitorsRes.ok ? await visitorsRes.json() : [];
 
-  document.getElementById('guard-stats').innerHTML = `
-    <div class="stat-card" style="background:var(--card-bg)"><div class="stat-val" style="color:var(--primary)">${queue.length}</div><div class="stat-lbl" style="color:var(--muted)">In Queue</div></div>
-    <div class="stat-card" style="background:var(--card-bg)"><div class="stat-val" style="color:var(--danger)">${alerts.length}</div><div class="stat-lbl" style="color:var(--muted)">Alerts</div></div>
-  `;
+  // Stats cards removed per user request
 
   // Active SOS alerts
   document.getElementById('active-alerts').innerHTML = alerts.map(a => `
@@ -114,6 +111,9 @@ async function loadGuardDashboard() {
 
   // Recent vehicle entries
   loadVehicleEntries();
+  
+  // Gate deliveries
+  loadGateDeliveriesHome();
 }
 
 // ── Realtime subscriptions ────────────────────────────────────────────────
@@ -288,21 +288,21 @@ async function loadVehicleEntries() {
   const html = data.length
     ? `<div style="overflow-x:auto"><table style="width:100%;font-size:.85rem">
         <thead><tr>
-          <th style="color:#93b4d4;text-align:left;padding:6px">Plate</th>
-          <th style="color:#93b4d4;text-align:left;padding:6px">Flat</th>
-          <th style="color:#93b4d4;text-align:left;padding:6px">In</th>
-          <th style="color:#93b4d4;text-align:left;padding:6px">Out</th>
+          <th style="color:var(--muted);text-align:left;padding:6px">Plate</th>
+          <th style="color:var(--muted);text-align:left;padding:6px">Flat</th>
+          <th style="color:var(--muted);text-align:left;padding:6px">In</th>
+          <th style="color:var(--muted);text-align:left;padding:6px">Out</th>
         </tr></thead>
         <tbody>${data.map(e => `
           <tr>
             <td style="padding:6px;font-weight:600;letter-spacing:1px">${e.number_plate}</td>
-            <td style="padding:6px;color:#93b4d4">${e.vehicles?.flats?.flat_number || (e.is_visitor_vehicle ? '🚶Visitor' : '—')}</td>
-            <td style="padding:6px;color:#93b4d4">${timeAgo(e.entry_time)}</td>
-            <td style="padding:6px">${e.exit_time ? '<span style="color:#34a853">'+timeAgo(e.exit_time)+'</span>' : '<span style="color:var(--warning)">Still inside</span>'}</td>
+            <td style="padding:6px;color:var(--muted)">${e.vehicles?.flats?.flat_number || (e.is_visitor_vehicle ? '🚶Visitor' : '—')}</td>
+            <td style="padding:6px;color:var(--muted)">${timeAgo(e.entry_time)}</td>
+            <td style="padding:6px">${e.exit_time ? '<span style="color:var(--success)">'+timeAgo(e.exit_time)+'</span>' : '<span style="color:var(--warning)">Still inside</span>'}</td>
           </tr>`).join('')}
         </tbody>
       </table></div>`
-    : '<p style="color:#93b4d4;text-align:center;padding:12px">No vehicles today</p>';
+    : '<p style="color:var(--muted);text-align:center;padding:12px">No vehicles today</p>';
 
   // Update both places (page + dashboard)
   const listEl = document.getElementById('vehicle-entries-list');
@@ -323,43 +323,77 @@ async function loadDeliveryFlats() {
       delFlat.appendChild(o);
     });
   }
-  // Load platforms
-  const pRes = await apiFetch('/delivery/platforms');
-  if (pRes.ok) {
-    const platforms = await pRes.json();
-    const pSel = document.getElementById('del-platform');
-    platforms.forEach(p => {
-      const o = document.createElement('option');
-      o.value = p.id; o.textContent = p.name;
-      pSel.appendChild(o);
-    });
-  }
 }
 
 async function logDelivery() {
   const body = {
     flat_id:       document.getElementById('del-flat').value,
-    platform_id:   document.getElementById('del-platform').value || null,
+    platform_name: document.getElementById('del-platform').value.trim() || null,
     tracking_id:   document.getElementById('del-tracking').value.trim(),
-    leave_at_gate: document.getElementById('del-lag').checked,
   };
   if (!body.flat_id) return toast('Select flat', 'error');
   const res  = await apiFetch('/delivery/', { method: 'POST', body: JSON.stringify(body) });
   const data = await res.json();
   if (res.ok) {
-    let msg = 'Delivery logged — resident notified';
-    if (data.parcel_otp) msg += ` · Parcel OTP: ${data.parcel_otp}`;
-    toast(msg, 'success');
+    toast('Delivery logged — resident notified', 'success');
+    // Clear form
+    document.getElementById('del-platform').value = '';
+    document.getElementById('del-tracking').value = '';
   } else toast('Failed', 'error');
 }
 
-async function collectParcel() {
-  const id  = document.getElementById('parcel-delivery-id').value.trim();
-  const otp = document.getElementById('parcel-otp-input').value.trim();
-  if (!id || !otp) return toast('Delivery ID and OTP required', 'error');
-  const res = await apiFetch(`/delivery/${id}/collect`, { method: 'POST', body: JSON.stringify({ otp }) });
-  if (res.ok) toast('Parcel collected ✓', 'success');
-  else { const e = await res.json(); toast(e.error || 'Failed', 'error'); }
+async function loadGateDeliveriesHome() {
+  const res = await apiFetch('/delivery/?status=left_at_gate');
+  if (!res.ok) return;
+  const data = await res.json();
+  
+  console.log('Gate deliveries:', data); // Debug log
+  
+  // Show all left_at_gate deliveries
+  const waiting = data.filter(d => d.status === 'left_at_gate');
+  
+  const html = waiting.length
+    ? waiting.map(d => {
+        const codeHtml = d.parcel_otp 
+          ? `<div style="background:var(--code-badge-bg);border-radius:6px;padding:8px;margin-top:8px;display:inline-block">
+              <div style="font-size:.65rem;color:var(--code-badge-text);opacity:0.8;margin-bottom:2px">COLLECTION CODE</div>
+              <div style="font-size:1.3rem;font-weight:900;letter-spacing:2px;color:var(--code-badge-text);word-break:break-all">${d.parcel_otp}</div>
+            </div>`
+          : '<div style="font-size:.8rem;color:var(--warning);margin-top:4px">⚠ No collection code yet</div>';
+        
+        return `
+          <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)">
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:1rem">${d.delivery_platforms?.name || 'Delivery'}</div>
+              <div style="font-size:.85rem;color:var(--text);margin-top:2px">
+                📍 Flat ${d.flats?.flat_number || '?'}
+              </div>
+              <div style="font-size:.8rem;color:var(--muted);margin-top:2px">
+                ${d.tracking_id ? '🔖 Tracking: ' + d.tracking_id : 'No tracking ID'}
+              </div>
+              <div style="font-size:.75rem;color:var(--muted);margin-top:2px">
+                ⏱ Left at gate: ${timeAgo(d.exit_time || d.entry_time)}
+              </div>
+              ${codeHtml}
+            </div>
+            <button class="btn btn-success" style="padding:5px 12px;font-size:.8rem" onclick="markDeliveryPicked('${d.id}')">Picked</button>
+          </div>
+        `;
+      }).join('')
+    : '<p style="text-align:center;padding:12px;color:var(--muted)">No deliveries waiting for pickup</p>';
+  
+  document.getElementById('gate-deliveries-home').innerHTML = html;
+}
+
+async function markDeliveryPicked(deliveryId) {
+  const res = await apiFetch(`/delivery/${deliveryId}/mark-collected`, { method: 'POST' });
+  if (res.ok) {
+    toast('Delivery marked as picked up ✓', 'success');
+    loadGateDeliveriesHome();
+  } else {
+    const err = await res.json();
+    toast(err.error || 'Failed to mark as picked', 'error');
+  }
 }
 
 // ── Domestic Help ─────────────────────────────────────────────────────────

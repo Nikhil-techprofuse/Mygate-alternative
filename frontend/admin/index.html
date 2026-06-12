@@ -32,7 +32,7 @@
     <div id="step-otp" style="display:none">
       <p style="margin-bottom:16px;color:var(--muted);font-size:.9rem">OTP sent to <strong id="otp-phone-display"></strong></p>
       <div class="form-group"><label>OTP</label>
-        <input id="inp-otp" class="form-control" type="number" placeholder="000000" maxlength="6">
+        <input id="inp-otp" class="form-control" type="text" placeholder="000000" maxlength="6" pattern="[0-9]*" inputmode="numeric">
       </div>
       <button class="btn btn-primary btn-full btn-lg" onclick="verifyOtp()">Login</button>
     </div>
@@ -108,11 +108,11 @@
               </div>
               <div class="form-group" style="margin-bottom:8px">
                 <label>No. of Floors</label>
-                <input id="new-building-floors" class="form-control" type="number" min="1" max="100" placeholder="e.g. 10" value="1">
+                <input id="new-building-floors" class="form-control" type="text" placeholder="e.g. 10" value="1" pattern="[0-9]*" inputmode="numeric">
               </div>
               <div class="form-group" style="margin-bottom:8px">
                 <label>Flats per Floor</label>
-                <input id="new-building-fpf" class="form-control" type="number" min="0" max="50" placeholder="e.g. 4" value="0">
+                <input id="new-building-fpf" class="form-control" type="text" placeholder="e.g. 4" value="0" pattern="[0-9]*" inputmode="numeric">
               </div>
             </div>
             <p id="building-flat-preview" style="font-size:.8rem;color:var(--muted);margin-bottom:10px"></p>
@@ -322,7 +322,7 @@
         <option value="morning">Morning</option><option value="afternoon">Afternoon</option><option value="night">Night</option>
       </select>
     </div>
-    <div class="form-group"><label>Monthly Salary (₹)</label><input id="s-salary" class="form-control" type="number"></div>
+    <div class="form-group"><label>Monthly Salary (₹)</label><input id="s-salary" class="form-control" type="text" pattern="[0-9]*" inputmode="numeric"></div>
     <button class="btn btn-primary btn-full" onclick="addStaff()">Add Staff</button>
   </div>
 </div>
@@ -331,7 +331,7 @@
   <div class="modal-box">
     <div class="modal-title">New Billing Head</div>
     <div class="form-group"><label>Name *</label><input id="bh-name" class="form-control" type="text"></div>
-    <div class="form-group"><label>Amount (₹)</label><input id="bh-amount" class="form-control" type="number"></div>
+    <div class="form-group"><label>Amount (₹)</label><input id="bh-amount" class="form-control" type="text" pattern="[0-9]*" inputmode="numeric"></div>
     <div class="form-group"><label>Frequency</label>
       <select id="bh-freq" class="form-control">
         <option value="monthly">Monthly</option><option value="quarterly">Quarterly</option>
@@ -341,7 +341,7 @@
     <div class="form-group" style="display:flex;align-items:center;gap:8px">
       <input type="checkbox" id="bh-gst"><label>GST Applicable</label>
     </div>
-    <div class="form-group"><label>GST %</label><input id="bh-gst-pct" class="form-control" type="number" value="18"></div>
+    <div class="form-group"><label>GST %</label><input id="bh-gst-pct" class="form-control" type="text" value="18" pattern="[0-9]*" inputmode="numeric"></div>
     <button class="btn btn-primary btn-full" onclick="addBillingHead()">Save</button>
   </div>
 </div>
@@ -350,9 +350,9 @@
   <div class="modal-box">
     <div class="modal-title">Add Amenity</div>
     <div class="form-group"><label>Name *</label><input id="am-name" class="form-control" type="text" placeholder="Clubhouse, Pool, Gym..."></div>
-    <div class="form-group"><label>Capacity</label><input id="am-cap" class="form-control" type="number"></div>
-    <div class="form-group"><label>Charge per slot (₹)</label><input id="am-charge" class="form-control" type="number" value="0"></div>
-    <div class="form-group"><label>Advance booking days</label><input id="am-adv" class="form-control" type="number" value="7"></div>
+    <div class="form-group"><label>Capacity</label><input id="am-cap" class="form-control" type="text" pattern="[0-9]*" inputmode="numeric"></div>
+    <div class="form-group"><label>Charge per slot (₹)</label><input id="am-charge" class="form-control" type="text" value="0" pattern="[0-9]*" inputmode="numeric"></div>
+    <div class="form-group"><label>Advance booking days</label><input id="am-adv" class="form-control" type="text" value="7" pattern="[0-9]*" inputmode="numeric"></div>
     <button class="btn btn-primary btn-full" onclick="addAmenity()">Create Amenity</button>
   </div>
 </div>
@@ -388,7 +388,7 @@
       </div>
       <div class="form-group">
         <label>Floor *</label>
-        <input id="res-floor" class="form-control" type="number" min="1" placeholder="e.g. 3">
+        <input id="res-floor" class="form-control" type="text" placeholder="e.g. 3" pattern="[0-9]*" inputmode="numeric">
       </div>
       <div class="form-group" style="grid-column:1/-1">
         <label>Flat Number *</label>
