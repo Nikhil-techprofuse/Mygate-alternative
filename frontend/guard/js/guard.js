@@ -75,37 +75,27 @@ async function loadGuardDashboard() {
       <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)">
         <div style="flex:1">
           <div style="font-weight:600">${v.visitor_name}</div>
-          <div style="font-size:.8rem;color:var(--muted)">${v.visitor_type} · Flat ${v.flats?.flat_number || '?'} · ${timeAgo(v.entry_time)}</div>
+          <div style="font-size:.8rem;color:var(--muted)">${v.visitor_type} · Flat ${v.flats?.flat_number || '?'}${v.flats?.buildings?.name ? ` (${v.flats.buildings.name})` : ''} · ${timeAgo(v.entry_time)}</div>
         </div>
         <span style="padding:5px 12px;font-size:.8rem;background:var(--card-bg);color:var(--warning);border:1px solid var(--warning);border-radius:4px">⏳ Pending</span>
       </div>`).join('')
     : '<p style="color:var(--muted);text-align:center;padding:12px">No pending approvals</p>';
 
-  // Active visitors (approved, not exited yet)
-  const activeVisitors = visitors.filter(v => v.approval_status === 'approved' && !v.exit_time);
-  document.getElementById('active-visitors').innerHTML = activeVisitors.length
-    ? activeVisitors.map(v => `
-      <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)">
+  // Recent visitor entries (pre-approved OTP + walk-in approved)
+  const recentVisitors = visitors.filter(v => ['approved', 'pre_approved'].includes(v.approval_status));
+  document.getElementById('recent-visitors').innerHTML = recentVisitors.length
+    ? recentVisitors.slice(0, 10).map(v => `
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
         <div style="flex:1">
-          <div style="font-weight:600">${v.visitor_name}</div>
-          <div style="font-size:.8rem;color:var(--muted)">${v.visitor_type} · Flat ${v.flats?.flat_number || '?'} · ${timeAgo(v.entry_time)}</div>
+          <div style="font-weight:600;color:var(--text)">${v.visitor_name}</div>
+          <div style="font-size:.85rem;color:var(--muted);margin-top:4px">
+            📍 Flat ${v.flats?.flat_number || '?'} ${v.visitor_phone ? `· 📱 ${v.visitor_phone}` : ''}
+          </div>
+          <div style="font-size:.8rem;color:var(--muted);margin-top:2px">
+            ⏱ Entry: ${formatDateTime(v.entry_time)}${v.exit_time ? ` · Exit: ${formatDateTime(v.exit_time)}` : ' · <span style="color:var(--warning)">Still inside</span>'}
+          </div>
         </div>
-        <button class="btn btn-success" style="padding:5px 12px;font-size:.8rem" onclick="logExitGuard('${v.id}')">Exit</button>
-      </div>`).join('')
-    : '<p style="color:var(--muted);text-align:center;padding:12px">No active visitors</p>';
-
-  // Recent visitor entries (only approved ones)
-  const recentApproved = visitors.filter(v => v.approval_status === 'approved');
-  document.getElementById('recent-visitors').innerHTML = recentApproved.length
-    ? recentApproved.slice(0, 10).map(v => `
-      <div style="padding:10px 0;border-bottom:1px solid var(--border)">
-        <div style="font-weight:600;color:var(--text)">${v.visitor_name}</div>
-        <div style="font-size:.85rem;color:var(--muted);margin-top:4px">
-          📍 Flat ${v.flats?.flat_number || '?'} ${v.visitor_phone ? `· 📱 ${v.visitor_phone}` : ''}
-        </div>
-        <div style="font-size:.8rem;color:var(--muted);margin-top:2px">
-          ⏱ Entry: ${formatDateTime(v.entry_time)}${v.exit_time ? ` · Exit: ${formatDateTime(v.exit_time)}` : ' · <span style="color:var(--warning)">Still inside</span>'}
-        </div>
+        ${!v.exit_time ? `<button class="btn btn-success" style="padding:5px 12px;font-size:.8rem" onclick="logExitGuard('${v.id}')">Exit</button>` : ''}
       </div>`).join('')
     : '<p style="color:var(--muted);text-align:center;padding:12px">No visitor entries today</p>';
 
@@ -145,23 +135,89 @@ async function acknowledgeAlert(id) {
   if (res.ok) { toast('Acknowledged — on my way!', 'success'); loadGuardDashboard(); }
 }
 
-// ── Visitor OTP verify ────────────────────────────────────────────────────
-async function verifyVisitorOtp() {
-  const otp = document.getElementById('otp-scan-input').value.trim();
-  if (!otp || otp.length !== 6) return toast('Enter 6-digit OTP', 'error');
-  const res = await apiFetch('/visitors/verify-otp', {
-    method: 'POST', body: JSON.stringify({ otp_code: otp }),
+// ── Unified code verify (visitor OTP + helper passcode) ─────────────────────
+let currentHelper = null;
+let currentHelperPasscode = '';
+
+async function verifyUnifiedCode() {
+  const code = document.getElementById('unified-code-input').value.trim();
+  const resultDiv = document.getElementById('unified-code-result');
+  const actionsDiv = document.getElementById('unified-code-actions');
+
+  if (!code || code.length < 4 || !/^\d+$/.test(code)) {
+    return toast('Enter a 4–6 digit code', 'error');
+  }
+
+  resultDiv.innerHTML = '';
+  actionsDiv.style.display = 'none';
+  actionsDiv.innerHTML = '';
+  currentHelper = null;
+  currentHelperPasscode = '';
+
+  const res = await apiFetch('/guards/verify-code', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
   });
   const data = await res.json();
+
   if (res.ok) {
-    document.getElementById('otp-result').innerHTML = `
-      <div class="card" style="background:var(--card-bg);border-color:var(--primary);color:var(--text)">
-        ✅ <strong>${data.visitor_name}</strong> — Pre-approved for Flat ${data.flat?.flat_number || '?'}
-      </div>`;
-    document.getElementById('otp-scan-input').value = '';
-  } else {
-    document.getElementById('otp-result').innerHTML = `<div class="card" style="background:var(--card-bg);border-color:var(--danger);color:var(--text)">❌ ${data.error}</div>`;
+    document.getElementById('unified-code-input').value = '';
+    if (data.type === 'visitor') {
+      displayVisitorDetails(data.data);
+      loadGuardDashboard();
+    } else if (data.type === 'helper') {
+      currentHelperPasscode = code;
+      displayHelperDetails(data.data);
+    }
+    return;
   }
+
+  resultDiv.innerHTML = `
+    <div class="verify-result-card error">
+      ❌ ${data.error || 'Code not found'}
+    </div>`;
+}
+
+function displayVisitorDetails(visitor) {
+  const resultDiv = document.getElementById('unified-code-result');
+  const validUntil = visitor.valid_until
+    ? `Valid until ${formatDateTime(visitor.valid_until)}`
+    : '';
+  resultDiv.innerHTML = `
+    <div class="verify-result-card">
+      <div class="verify-result-title">✅ ${visitor.visitor_name}</div>
+      <div class="verify-result-meta">
+        Visitor · Flat ${visitor.flat?.flat_number || '?'}
+        ${visitor.visitor_phone ? ` · ${visitor.visitor_phone}` : ''}
+      </div>
+      ${validUntil ? `<div class="verify-result-meta">${validUntil}</div>` : ''}
+      <div class="verify-result-meta" style="color:var(--success);margin-top:6px">Entry approved and logged</div>
+    </div>`;
+  toast(`Entry approved: ${visitor.visitor_name}`, 'success');
+}
+
+function displayHelperDetails(helper) {
+  currentHelper = helper;
+  const flatInfo = (helper.helper_flat_links || []).map(l => l.flats?.flat_number).filter(Boolean).join(', ');
+  const resultDiv = document.getElementById('unified-code-result');
+  const actionsDiv = document.getElementById('unified-code-actions');
+
+  resultDiv.innerHTML = `
+    <div class="verify-result-card" style="display:flex;gap:12px;align-items:center">
+      <img class="verify-result-avatar" src="${helper.photo_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(helper.name)}" alt="">
+      <div>
+        <div class="verify-result-title">${helper.name}</div>
+        <div class="verify-result-meta">${helper.helper_type}${flatInfo ? ' · Flat ' + flatInfo : ''}</div>
+        <div class="verify-result-meta">${helper.active_entry ? 'Currently inside' : 'Not checked in today'}</div>
+      </div>
+    </div>`;
+
+  if (helper.active_entry) {
+    actionsDiv.innerHTML = '<button class="btn btn-warning btn-full" onclick="logHelperExit()">Log Exit</button>';
+  } else {
+    actionsDiv.innerHTML = '<button class="btn btn-success btn-full" onclick="logHelperEntry()">✓ Log Entry</button>';
+  }
+  actionsDiv.style.display = 'block';
 }
 
 // ── Walk-in ───────────────────────────────────────────────────────────────
@@ -212,10 +268,13 @@ async function logWalkin() {
   if (!body.visitor_name || !body.flat_id) return toast('Name and flat required', 'error');
   const res = await apiFetch('/visitors/walkin', { method: 'POST', body: JSON.stringify(body) });
   if (res.ok) {
-    toast('Approval request sent to resident', 'success');
+    const data = await res.json();
+    const flatNo = data.log?.flats?.flat_number || '?';
+    toast(`Approval request sent to Flat ${flatNo}`, 'success');
     document.getElementById('walkin-name').value = '';
     document.getElementById('walkin-phone').value = '';
     document.getElementById('walkin-flat').value = '';
+    loadGuardDashboard();
   } else {
     const e = await res.json();
     toast(e.error || 'Failed', 'error');
@@ -396,56 +455,26 @@ async function markDeliveryPicked(deliveryId) {
   }
 }
 
-// ── Domestic Help ─────────────────────────────────────────────────────────
-let currentHelper = null;
-
-async function lookupHelper() {
-  const passcode = document.getElementById('helper-passcode').value.trim();
-  if (!passcode || passcode.length !== 6) return toast('Enter 6-digit passcode', 'error');
-  const res  = await apiFetch('/domestic-help/lookup', { method: 'POST', body: JSON.stringify({ passcode }) });
-  const data = await res.json();
-  const el   = document.getElementById('helper-result');
-  if (res.ok) {
-    currentHelper = data;
-    const flatInfo = (data.helper_flat_links || []).map(l => l.flats?.flat_number).join(', ');
-    el.innerHTML = `
-      <div class="card" style="background:var(--card-bg);border:2px solid var(--primary);display:flex;gap:12px;align-items:center">
-        <img src="${data.photo_url || 'https://ui-avatars.com/api/?name='+encodeURIComponent(data.name)}" style="width:52px;height:52px;border-radius:50%">
-        <div>
-          <div style="font-weight:700;color:var(--text)">${data.name}</div>
-          <div style="font-size:.85rem;color:var(--muted)">${data.helper_type} · Flat ${flatInfo}</div>
-        </div>
-      </div>`;
-    
-    const btnContainer = document.getElementById('helper-entry-btn');
-    if (data.active_entry) {
-      // Already entered today, show Exit button
-      btnContainer.innerHTML = '<button class="btn btn-warning btn-full" onclick="logHelperExit()">Log Exit</button>';
-    } else {
-      // No entry today, show Entry button
-      btnContainer.innerHTML = '<button class="btn btn-success btn-full" onclick="logHelperEntry()">✓ Log Entry</button>';
-    }
-    btnContainer.style.display = 'block';
-  } else {
-    el.innerHTML = `<div class="card" style="background:var(--card-bg);border:2px solid var(--danger);color:var(--text)">❌ ${data.error || 'Unknown passcode'}</div>`;
-    document.getElementById('helper-entry-btn').style.display = 'none';
-  }
+// ── Domestic Help entry/exit (after unified verify) ───────────────────────
+function clearUnifiedHelperResult() {
+  document.getElementById('unified-code-result').innerHTML = '';
+  document.getElementById('unified-code-actions').style.display = 'none';
+  document.getElementById('unified-code-actions').innerHTML = '';
+  currentHelper = null;
+  currentHelperPasscode = '';
 }
 
 async function logHelperEntry() {
-  if (!currentHelper) return;
+  if (!currentHelper || !currentHelperPasscode) return;
   const flatLinks = currentHelper.helper_flat_links || [];
   const flatId    = flatLinks[0]?.flat_id;
   const res = await apiFetch('/domestic-help/entry', {
     method: 'POST',
-    body: JSON.stringify({ passcode: document.getElementById('helper-passcode').value.trim(), flat_id: flatId }),
+    body: JSON.stringify({ passcode: currentHelperPasscode, flat_id: flatId }),
   });
   if (res.ok) {
     toast(`Entry logged for ${currentHelper.name}`, 'success');
-    document.getElementById('helper-passcode').value = '';
-    document.getElementById('helper-result').innerHTML = '';
-    document.getElementById('helper-entry-btn').style.display = 'none';
-    currentHelper = null;
+    clearUnifiedHelperResult();
   } else toast('Failed to log entry', 'error');
 }
 
@@ -457,10 +486,7 @@ async function logHelperExit() {
   });
   if (res.ok) {
     toast(`Exit logged for ${currentHelper.name}`, 'success');
-    document.getElementById('helper-passcode').value = '';
-    document.getElementById('helper-result').innerHTML = '';
-    document.getElementById('helper-entry-btn').style.display = 'none';
-    currentHelper = null;
+    clearUnifiedHelperResult();
   } else toast('Failed to log exit', 'error');
 }
 

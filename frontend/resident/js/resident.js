@@ -186,6 +186,10 @@ async function loadDashboard() {
   const visitors   = visRes.ok   ? await visRes.json()   : [];
   const deliveries = delRes.ok ? await delRes.json()   : [];
 
+  if (_myProfile.flat_id) {
+    localStorage.setItem((window.MG_PORTAL || 'mg') + '_flat_id', _myProfile.flat_id);
+  }
+
   const flatLabel = _myProfile.flats?.flat_number
     ? (_myProfile.flats.buildings?.name ? `${_myProfile.flats.buildings.name} – ${_myProfile.flats.flat_number}` : _myProfile.flats.flat_number)
     : '—';
@@ -299,16 +303,18 @@ async function approveVisitor(logId, decision) {
   if (res.ok) {
     toast(decision === 'approved' ? 'Visitor approved!' : 'Visitor denied', decision === 'approved' ? 'success' : 'error');
     loadDashboard();
+    loadPendingWalkins();
   }
 }
 
 function visitorCard(v, withActions = false) {
+  const flatLabel = v.flats?.flat_number ? `Flat ${v.flats.flat_number} · ` : '';
   return `
     <div class="visitor-card">
       <img src="${v.visitor_photo_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(v.visitor_name)}" alt="">
       <div class="visitor-info">
         <div class="visitor-name">${v.visitor_name}</div>
-        <div class="visitor-meta">${v.visitor_type || ''} · ${timeAgo(v.entry_time)}</div>
+        <div class="visitor-meta">${flatLabel}${v.visitor_type || 'guest'} · ${timeAgo(v.entry_time)}</div>
         <div>${statusBadge(v.approval_status)}</div>
       </div>
       ${withActions && v.approval_status === 'pending' ? `
@@ -321,7 +327,22 @@ function visitorCard(v, withActions = false) {
 
 // ── Visitors list ─────────────────────────────────────────────────────────
 async function loadVisitors() {
+  await loadPendingWalkins();
   showVisitorTab('invites');
+}
+
+async function loadPendingWalkins() {
+  const panel = document.getElementById('visitors-pending-panel');
+  if (!panel) return;
+  const res = await apiFetch('/visitors/');
+  const data = res.ok ? await res.json() : [];
+  const pending = data.filter(v => v.approval_status === 'pending');
+  panel.innerHTML = pending.length
+    ? `<div class="card" style="margin-bottom:12px">
+        <div class="card-header">⏳ Pending at Gate</div>
+        ${pending.map(v => visitorCard(v, true)).join('')}
+      </div>`
+    : '';
 }
 
 function showVisitorTab(tab) {
@@ -347,17 +368,23 @@ function showVisitorTab(tab) {
 async function loadInvites() {
   const res  = await apiFetch('/visitors/invites');
   const data = res.ok ? await res.json() : [];
-  const now  = new Date();
+  const nowMs = Date.now();
   document.getElementById('visitors-invites-panel').innerHTML = data.length
     ? data.map(inv => {
-        const active = new Date(inv.valid_until) > now && !inv.is_used;
+        const expired = new Date(inv.valid_until).getTime() <= nowMs;
+        const active  = !expired && !inv.is_used;
+        const statusBadge = expired
+          ? '<span class="badge" style="margin-left:6px;background:var(--muted)">Expired</span>'
+          : inv.is_used
+            ? '<span class="badge" style="margin-left:6px;background:var(--muted)">Used</span>'
+            : '<span class="badge badge-success" style="margin-left:6px">Active</span>';
         return `
         <div class="card" style="margin-bottom:12px">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <div>
               <strong>${inv.visitor_name}</strong>
               ${inv.is_recurring ? '<span class="badge badge-info" style="margin-left:6px">Recurring</span>' : ''}
-              ${active ? '<span class="badge badge-success" style="margin-left:6px">Active</span>' : '<span class="badge" style="margin-left:6px;background:var(--muted)">Expired</span>'}
+              ${statusBadge}
             </div>
             ${active ? `<button class="btn btn-danger" style="padding:4px 10px;font-size:.8rem" onclick="cancelInvite('${inv.id}')">Cancel</button>` : ''}
           </div>
@@ -452,19 +479,15 @@ async function approveDelivery(deliveryId, decision) {
 
 async function confirmLeaveAtGate() {
   const otp = document.getElementById('delivery-otp-input').value.trim();
-  
-  if (!otp) {
-    return toast('Please enter a collection code', 'error');
-  }
-  
+
   const res = await apiFetch(`/delivery/${_currentDeliveryId}/decide`, {
     method: 'PATCH',
-    body: JSON.stringify({ decision: 'leave_at_gate', otp: otp }),
+    body: JSON.stringify({ decision: 'leave_at_gate', otp: otp || null }),
   });
-  
+
   if (res.ok) {
     closeModal('modal-delivery-otp');
-    toast(`Left at gate! Code: ${otp}`, 'success');
+    toast(otp ? `Left at gate! Code: ${otp}` : 'Left at gate!', 'success');
     loadDashboard();
   } else {
     const err = await res.json();

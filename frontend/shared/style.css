@@ -325,3 +325,25 @@ input[type=number] {
   appearance: textfield;
 }
 
+/* ── Guard unified code verify ────────────────────────────────────── */
+.verify-code-card { margin-bottom: 12px; }
+.verify-code-hint {
+  font-size: .85rem;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+.verify-result-card {
+  margin-top: 12px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 2px solid var(--primary);
+  background: var(--card-bg);
+  color: var(--text);
+}
+.verify-result-card.error { border-color: var(--danger); }
+.verify-result-card .verify-result-title { font-weight: 700; font-size: 1rem; }
+.verify-result-card .verify-result-meta { font-size: .85rem; color: var(--muted); margin-top: 4px; }
+.verify-result-card .verify-result-avatar {
+  width: 52px; height: 52px; border-radius: 50%; object-fit: cover;
+}
+

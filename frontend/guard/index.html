@@ -54,13 +54,21 @@
     <!-- Dashboard -->
     <div id="page-dashboard" class="page active">
       <div id="active-alerts"></div>
+      <div class="card verify-code-card">
+        <div class="card-header">Enter the Code</div>
+        <!-- <p class="verify-code-hint">Enter visitor OTP (6 digits) or helper passcode (4–6 digits)</p> -->
+        <div class="form-group">
+          <input id="unified-code-input" class="form-control big-otp-input" type="text"
+                 placeholder="Enter Code" pattern="[0-9]*" inputmode="numeric" maxlength="6"
+                 onkeydown="if(event.key==='Enter')verifyUnifiedCode()">
+        </div>
+        <button class="btn btn-primary btn-full btn-lg" onclick="verifyUnifiedCode()">Verify Code</button>
+        <div id="unified-code-result"></div>
+        <div id="unified-code-actions" style="display:none;margin-top:10px"></div>
+      </div>
       <div class="card">
         <div class="card-header">⏳ Pending Approvals</div>
         <div id="visitor-queue"></div>
-      </div>
-      <div class="card" style="margin-top:12px">
-        <div class="card-header">✅ Active Visitors (Approved)</div>
-        <div id="active-visitors"></div>
       </div>
       <div class="card" style="margin-top:12px">
         <div class="card-header">👥 Recent Visitor Entries</div>
@@ -79,15 +87,6 @@
     <!-- Visitor Entry -->
     <div id="page-visitor-entry" class="page">
       <h2 class="page-title">Visitor Entry</h2>
-
-      <div class="card" style="margin-bottom:12px">
-        <div class="card-header">Verify OTP Invite</div>
-        <div class="form-group">
-          <input id="otp-scan-input" class="form-control big-otp-input" type="text" placeholder="Enter OTP" pattern="[0-9]*" inputmode="numeric">
-        </div>
-        <button class="btn btn-primary btn-full" onclick="verifyVisitorOtp()">Verify OTP</button>
-        <div id="otp-result" style="margin-top:12px"></div>
-      </div>
 
       <div class="card">
         <div class="card-header">Walk-in Visitor</div>
@@ -159,21 +158,6 @@
       </div>
     </div>
 
-    <!-- Domestic Help -->
-    <div id="page-helpers" class="page">
-      <h2 class="page-title">Daily Help</h2>
-      <div class="card">
-        <div class="form-group">
-          <input id="helper-passcode" class="form-control big-otp-input" type="text" placeholder="Enter Passcode" pattern="[0-9]*" inputmode="numeric">
-        </div>
-        <button class="btn btn-primary btn-full" onclick="lookupHelper()">Verify Helper</button>
-        <div id="helper-result" style="margin-top:12px"></div>
-        <div id="helper-entry-btn" style="display:none;margin-top:10px">
-          <button class="btn btn-success btn-full" onclick="logHelperEntry()">✓ Log Entry</button>
-        </div>
-      </div>
-    </div>
-
     <!-- Kids Checkout -->
     <div id="page-kids" class="page">
       <h2 class="page-title">Kids Checkout</h2>
@@ -193,7 +177,6 @@
     <a href="#" data-page="page-visitor-entry" onclick="showPage('page-visitor-entry');loadFlatsList()"><span class="icon">👤</span>Visitor</a>
     <a href="#" data-page="page-vehicle"       onclick="showPage('page-vehicle');loadVehicleEntries()"><span class="icon">🚗</span>Vehicle</a>
     <a href="#" data-page="page-delivery"      onclick="showPage('page-delivery');loadDeliveryFlats()"><span class="icon">📦</span>Delivery</a>
-    <a href="#" data-page="page-helpers"       onclick="showPage('page-helpers')"><span class="icon">🧹</span>Help</a>
   </nav>
 </div>
 

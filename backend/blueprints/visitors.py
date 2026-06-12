@@ -7,6 +7,82 @@ from ..utils.otp import generate_numeric_otp
 visitors_bp = Blueprint('visitors', __name__)
 
 
+def cleanup_expired_visitor_otps(sb, flat_id=None):
+    """Delete visitor OTP invites past their valid_until time."""
+    now = datetime.now(timezone.utc).isoformat()
+    query = sb.table('visitor_otps').delete().lt('valid_until', now)
+    if flat_id:
+        query = query.eq('flat_id', flat_id)
+    result = query.execute()
+    return len(result.data or [])
+
+
+def verify_visitor_otp_internal(sb, society_id, guard_id, otp_code, gate_id=None):
+    """Verify a visitor OTP and log entry. Returns dict with success, data/error, status."""
+    now = datetime.now(timezone.utc).isoformat()
+
+    otp_check = (
+        sb.table('visitor_otps')
+        .select('id, is_used, valid_from, valid_until, flat_id, flats(society_id)')
+        .eq('otp_code', otp_code)
+        .limit(1)
+        .execute()
+    )
+
+    if not otp_check.data:
+        return {'success': False, 'error': 'Unknown OTP code', 'status': 404, 'not_found': True}
+
+    otp_info = otp_check.data[0]
+
+    if otp_info.get('flats', {}).get('society_id') != society_id:
+        return {'success': False, 'error': 'OTP belongs to a different society', 'status': 403}
+
+    if otp_info.get('is_used'):
+        return {'success': False, 'error': 'OTP already used', 'status': 400}
+
+    if otp_info.get('valid_from') and otp_info['valid_from'] > now:
+        return {'success': False, 'error': 'OTP not yet valid', 'status': 400}
+    if otp_info.get('valid_until') and otp_info['valid_until'] < now:
+        sb.table('visitor_otps').delete().eq('id', otp_info['id']).execute()
+        return {'success': False, 'error': 'OTP expired', 'status': 400}
+
+    otp_row = (
+        sb.table('visitor_otps')
+        .select('*, flats(flat_number, building_id)')
+        .eq('id', otp_info['id'])
+        .limit(1)
+        .execute()
+    )
+
+    invite = otp_row.data[0]
+    log_result = sb.table('visitor_logs').insert({
+        'society_id':      society_id,
+        'flat_id':         invite['flat_id'],
+        'gate_id':         gate_id,
+        'guard_id':        guard_id,
+        'visitor_name':    invite['visitor_name'],
+        'visitor_phone':   invite['visitor_phone'],
+        'visitor_type':    'guest',
+        'approval_status': 'pre_approved',
+        'entry_time':      now,
+    }).execute()
+
+    if not invite.get('is_recurring'):
+        sb.table('visitor_otps').update({'is_used': True}).eq('id', invite['id']).execute()
+
+    return {
+        'success': True,
+        'data': {
+            'status':       'approved',
+            'visitor_name': invite['visitor_name'],
+            'visitor_phone': invite.get('visitor_phone'),
+            'valid_until':  invite.get('valid_until'),
+            'flat':         invite.get('flats', {}),
+            'log_id':       log_result.data[0]['id'],
+        },
+    }
+
+
 # ── M2: Pre-approved OTP invite ───────────────────────────────────────────────
 
 @visitors_bp.post('/invite')
@@ -44,8 +120,9 @@ def create_invite():
 @require_auth
 @require_role('resident', 'tenant')
 def list_invites():
-    """List all OTP invites for the resident's flat."""
+    """List active OTP invites for the resident's flat (expired ones are auto-deleted)."""
     sb = get_admin_client()
+    cleanup_expired_visitor_otps(sb, flat_id=g.flat_id)
     result = (
         sb.table('visitor_otps')
         .select('*')
@@ -89,69 +166,10 @@ def verify_visitor_otp():
         return jsonify({'error': 'otp_code is required'}), 400
 
     sb = get_admin_client()
-    now = datetime.now(timezone.utc).isoformat()
-
-    # First, check if OTP exists at all (for better error messages)
-    otp_check = (
-        sb.table('visitor_otps')
-        .select('id, is_used, valid_from, valid_until, flat_id, flats(society_id)')
-        .eq('otp_code', otp_code)
-        .limit(1)
-        .execute()
-    )
-
-    if not otp_check.data:
-        return jsonify({'error': 'Unknown OTP code'}), 404
-
-    otp_info = otp_check.data[0]
-    
-    # Check society match
-    if otp_info.get('flats', {}).get('society_id') != g.society_id:
-        return jsonify({'error': 'OTP belongs to a different society'}), 403
-    
-    # Check if already used
-    if otp_info.get('is_used'):
-        return jsonify({'error': 'OTP already used'}), 400
-    
-    # Check time validity
-    if otp_info.get('valid_from') and otp_info['valid_from'] > now:
-        return jsonify({'error': 'OTP not yet valid'}), 400
-    if otp_info.get('valid_until') and otp_info['valid_until'] < now:
-        return jsonify({'error': 'OTP expired'}), 400
-
-    # Fetch full OTP details
-    otp_row = (
-        sb.table('visitor_otps')
-        .select('*, flats(flat_number, building_id)')
-        .eq('id', otp_info['id'])
-        .limit(1)
-        .execute()
-    )
-
-    invite = otp_row.data[0]
-    # Log visitor entry
-    log_result = sb.table('visitor_logs').insert({
-        'society_id':      g.society_id,
-        'flat_id':         invite['flat_id'],
-        'gate_id':         gate_id,
-        'guard_id':        g.user_id,
-        'visitor_name':    invite['visitor_name'],
-        'visitor_phone':   invite['visitor_phone'],
-        'visitor_type':    'guest',
-        'approval_status': 'pre_approved',
-        'entry_time':      now,
-    }).execute()
-
-    # Mark OTP used (unless recurring)
-    if not invite.get('is_recurring'):
-        sb.table('visitor_otps').update({'is_used': True}).eq('id', invite['id']).execute()
-
-    return jsonify({
-        'status':      'approved',
-        'visitor_name': invite['visitor_name'],
-        'flat':        invite.get('flats', {}),
-        'log_id':      log_result.data[0]['id'],
-    })
+    result = verify_visitor_otp_internal(sb, g.society_id, g.user_id, otp_code, gate_id=gate_id)
+    if result['success']:
+        return jsonify(result['data'])
+    return jsonify({'error': result['error']}), result['status']
 
 
 # ── M2: Walk-in (unexpected) visitor ─────────────────────────────────────────
@@ -173,7 +191,7 @@ def log_walkin():
     result = sb.table('visitor_logs').insert({
         'society_id':      g.society_id,
         'flat_id':         data['flat_id'],
-        'gate_id':         data.get('gate_id'),
+        'gate_id':         data.get('gate_id') or g.profile.get('gate_id'),
         'guard_id':        g.user_id,
         'visitor_name':    data['visitor_name'],
         'visitor_phone':   data.get('visitor_phone'),
@@ -184,9 +202,15 @@ def log_walkin():
         'entry_time':      now,
     }).execute()
 
-    log = result.data[0]
-    # Realtime broadcast is picked up by resident browser via Supabase channel
-    return jsonify({'log_id': log['id'], 'status': 'pending_approval'}), 201
+    log_id = result.data[0]['id']
+    log = (
+        sb.table('visitor_logs')
+        .select('*, flats(flat_number, buildings(name))')
+        .eq('id', log_id)
+        .single()
+        .execute()
+    )
+    return jsonify({'log_id': log_id, 'status': 'pending_approval', 'log': log.data}), 201
 
 
 @visitors_bp.patch('/<log_id>/approve')
@@ -279,7 +303,7 @@ def gate_queue():
     sb  = get_admin_client()
     res = (
         sb.table('visitor_logs')
-        .select('*')
+        .select('*, flats(flat_number, buildings(name))')
         .eq('society_id', g.society_id)
         .eq('approval_status', 'pending')
         .order('entry_time', desc=True)

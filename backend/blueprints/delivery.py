@@ -85,11 +85,7 @@ def resident_decision(delivery_id):
         updates['status'] = 'rejected'
         updates['exit_time'] = datetime.now(timezone.utc).isoformat()
     elif decision == 'leave_at_gate':
-        # Resident must provide OTP/Code
-        parcel_otp = data.get('otp', '').strip()
-        if not parcel_otp:
-            return jsonify({'error': 'Collection code is required'}), 400
-        
+        parcel_otp = (data.get('otp') or '').strip() or None
         updates['status'] = 'left_at_gate'
         updates['leave_at_gate'] = True
         updates['parcel_otp'] = parcel_otp

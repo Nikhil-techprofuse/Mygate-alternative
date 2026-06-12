@@ -108,6 +108,7 @@
     <!-- Visitors -->
     <div id="page-visitors" class="page" style="padding:16px">
       <h2 class="page-title">Visitors</h2>
+      <div id="visitors-pending-panel"></div>
       <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
         <button class="btn btn-ghost" id="tab-invites-btn" onclick="showVisitorTab('invites')">🔑 Active Invites</button>
         <button class="btn btn-ghost" id="tab-history-btn" onclick="showVisitorTab('history')">📋 History</button>
@@ -258,9 +259,9 @@
 <div id="modal-delivery-otp" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-delivery-otp')">
   <div class="modal-box">
     <div class="modal-title">📍 Leave at Gate</div>
-    <p style="color:var(--muted);margin-bottom:16px;font-size:.9rem">Enter a collection code/OTP. Share this with whoever will collect the parcel from the gate.</p>
+    <p style="color:var(--muted);margin-bottom:16px;font-size:.9rem">Enter a code/OTP if needed to collect the parcel from the delivey guy</p>
     <div class="form-group">
-      <label>Collection Code *</label>
+      <label>Collection Code (optional)</label>
       <input id="delivery-otp-input" class="form-control" type="text" placeholder="Enter your code" style="text-align:center;letter-spacing:3px;font-size:1.2rem;font-weight:600">
     </div>
     <div style="display:flex;gap:8px">

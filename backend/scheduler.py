@@ -118,6 +118,20 @@ def generate_monthly_invoices(app):
         logger.warning(f'generate_monthly_invoices skipped: {e}')
 
 
+def cleanup_expired_visitor_invites(app):
+    """Every 15 min — remove visitor OTP invites past valid_until."""
+    try:
+        with app.app_context():
+            from .supabase_client import get_admin_client
+            from .blueprints.visitors import cleanup_expired_visitor_otps
+            sb = get_admin_client()
+            count = cleanup_expired_visitor_otps(sb)
+            if count:
+                logger.info(f'Removed {count} expired visitor OTP invite(s)')
+    except Exception as e:
+        logger.warning(f'cleanup_expired_visitor_invites skipped: {e}')
+
+
 def cancel_unpaid_bookings(app):
     """Every 35 min — cancel amenity bookings not paid within 30 min."""
     try:
@@ -167,7 +181,13 @@ def init_scheduler(app):
         id='cancel_unpaid_bookings',
         replace_existing=True,
     )
+    scheduler.add_job(
+        func=lambda: cleanup_expired_visitor_invites(app),
+        trigger=IntervalTrigger(minutes=15),
+        id='cleanup_expired_visitor_invites',
+        replace_existing=True,
+    )
 
     scheduler.start()
-    logger.info('APScheduler started with 4 jobs')
+    logger.info('APScheduler started with 5 jobs')
     return scheduler

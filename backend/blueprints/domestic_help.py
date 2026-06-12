@@ -7,6 +7,45 @@ from ..utils.otp import generate_numeric_otp
 domestic_help_bp = Blueprint('domestic_help', __name__)
 
 
+def lookup_helper_by_passcode(sb, society_id, passcode):
+    """Look up a domestic helper by passcode. Returns dict with success, data/error, status."""
+    helper = (
+        sb.table('domestic_helpers')
+        .select('*, helper_flat_links(flat_id, flats(flat_number))')
+        .eq('society_id', society_id)
+        .eq('passcode', passcode)
+        .limit(1)
+        .execute()
+    )
+    if not helper.data:
+        return {'success': False, 'error': 'Unknown passcode', 'status': 404, 'not_found': True}
+
+    helper_data = helper.data[0]
+    if helper_data.get('is_blacklisted'):
+        return {
+            'success': False,
+            'error': 'Helper is blacklisted',
+            'status': 403,
+            'blacklisted': True,
+            'data': helper_data,
+        }
+
+    today = date.today().isoformat()
+    active_entry = (
+        sb.table('helper_attendance')
+        .select('id, entry_time, flat_id')
+        .eq('helper_id', helper_data['id'])
+        .eq('date', today)
+        .is_('exit_time', 'null')
+        .order('entry_time', desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    helper_data['active_entry'] = active_entry.data[0] if active_entry.data else None
+    return {'success': True, 'data': helper_data}
+
+
 @domestic_help_bp.post('/')
 @require_auth
 @require_role('resident', 'tenant')
@@ -62,35 +101,12 @@ def lookup_passcode():
     if not passcode:
         return jsonify({'error': 'passcode required'}), 400
     sb = get_admin_client()
-    helper = (
-        sb.table('domestic_helpers')
-        .select('*, helper_flat_links(flat_id, flats(flat_number))')
-        .eq('society_id', g.society_id)
-        .eq('passcode', passcode)
-        .limit(1)
-        .execute()
-    )
-    if not helper.data:
-        return jsonify({'error': 'Unknown passcode'}), 404
-    helper_data = helper.data[0]
-    if helper_data.get('is_blacklisted'):
-        return jsonify({'error': 'Helper is blacklisted', 'helper': helper_data}), 403
-    
-    # Check if there's an active entry today (no exit time)
-    today = date.today().isoformat()
-    active_entry = (
-        sb.table('helper_attendance')
-        .select('id, entry_time, flat_id')
-        .eq('helper_id', helper_data['id'])
-        .eq('date', today)
-        .is_('exit_time', 'null')
-        .order('entry_time', desc=True)
-        .limit(1)
-        .execute()
-    )
-    
-    helper_data['active_entry'] = active_entry.data[0] if active_entry.data else None
-    return jsonify(helper_data)
+    result = lookup_helper_by_passcode(sb, g.society_id, passcode)
+    if result['success']:
+        return jsonify(result['data'])
+    if result.get('blacklisted'):
+        return jsonify({'error': result['error'], 'helper': result['data']}), result['status']
+    return jsonify({'error': result['error']}), result['status']
 
 
 @domestic_help_bp.post('/entry')

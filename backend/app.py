@@ -29,6 +29,7 @@ def create_app():
     from .blueprints.reports        import reports_bp
     from .blueprints.admin          import admin_bp
     from .blueprints.notifications  import notifications_bp
+    from .blueprints.guards         import guards_bp
 
     app.register_blueprint(auth_bp,             url_prefix='/api/auth')
     app.register_blueprint(visitors_bp,         url_prefix='/api/visitors')
@@ -45,6 +46,7 @@ def create_app():
     app.register_blueprint(reports_bp,          url_prefix='/api/reports')
     app.register_blueprint(admin_bp,            url_prefix='/api/admin')
     app.register_blueprint(notifications_bp,    url_prefix='/api/notifications')
+    app.register_blueprint(guards_bp,           url_prefix='/api/guards')
 
     # ── Health check ─────────────────────────────────────────────────────────
     @app.get('/api/health')
