@@ -1,6 +1,4 @@
-
 // ── Resident Portal JS ────────────────────────────────────────────────────
-
 // ── Boot ──────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
   try {
@@ -32,7 +30,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     document.body.appendChild(errDiv);
   }
 });
-
 async function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-shell').style.display = 'block';
@@ -40,17 +37,14 @@ async function showApp() {
   subscribeVisitorApprovals();
   subscribeDeliveries();
 }
-
 function resetLogin() {
   document.getElementById('step-phone').style.display = 'block';
   document.getElementById('step-otp').style.display   = 'none';
 }
-
 function logout() {
   Auth.clear();
   location.reload();
 }
-
 // ── Auth ──────────────────────────────────────────────────────────────────
 async function sendOtp() {
   const phone = document.getElementById('inp-phone').value.trim();
@@ -70,7 +64,6 @@ async function sendOtp() {
     toast(e.error || 'Failed to send OTP', 'error');
   }
 }
-
 async function verifyOtp() {
   const phone = document.getElementById('inp-phone').value.trim();
   const token = document.getElementById('inp-otp').value.trim();
@@ -92,10 +85,8 @@ async function verifyOtp() {
     toast(e.error || 'Invalid OTP', 'error');
   }
 }
-
 // ── Dashboard ─────────────────────────────────────────────────────────────
 let _myProfile = {};
-
 async function loadDashboard() {
   const [profRes, visRes, delRes] = await Promise.all([
     apiFetch('/auth/me'),
@@ -111,30 +102,24 @@ async function loadDashboard() {
   if (_myProfile.society_id && _myProfile.society_id !== Auth.societyId) {
     localStorage.setItem('res_society_id', _myProfile.society_id);
   }
-
   const visitors   = visRes.ok   ? await visRes.json()   : [];
   const deliveries = delRes.ok ? await delRes.json()   : [];
-
   const flatLabel = _myProfile.flats?.flat_number
     ? (_myProfile.flats.buildings?.name ? `${_myProfile.flats.buildings.name} – ${_myProfile.flats.flat_number}` : _myProfile.flats.flat_number)
     : '—';
-
   document.getElementById('user-name-display').textContent = _myProfile.full_name || 'Profile';
   if (_myProfile.kids_checkout_enabled !== undefined) {
     document.getElementById('kids-checkout-toggle').checked = _myProfile.kids_checkout_enabled;
   }
-
   document.getElementById('dashboard-stats').innerHTML = `
     <div class="stat-card" onclick="showPage('page-visitors');loadVisitors()" style="cursor:pointer"><div class="stat-val">${visitors.filter(v=>v.approval_status==='pending').length}</div><div class="stat-lbl">Pending</div></div>
     <div class="stat-card" onclick="showPage('page-delivery');loadDeliveries()" style="cursor:pointer"><div class="stat-val">${deliveries.length}</div><div class="stat-lbl">Deliveries</div></div>
   `;
-
   const pending = visitors.filter(v => v.approval_status === 'pending');
   document.getElementById('pending-visitors').innerHTML = pending.length
     ? pending.map(v => visitorCard(v, true)).join('')
     : '<p style="color:var(--muted);font-size:.9rem;text-align:center;padding:12px">No pending approvals</p>';
 }
-
 function openInviteModal() {
   const flat = _myProfile.flats;
   const label = flat?.flat_number
@@ -143,7 +128,6 @@ function openInviteModal() {
   document.getElementById('inv-flat-display').value = label;
   openModal('modal-invite');
 }
-
 // ── Visitor approval (realtime) ───────────────────────────────────────────
 function subscribeVisitorApprovals() {
   const flatId = Auth.flatId;
@@ -166,7 +150,6 @@ function subscribeVisitorApprovals() {
     })
     .subscribe();
 }
-
 // ── Deliveries realtime sync ──────────────────────────────────────────────
 function subscribeDeliveries() {
   const flatId = Auth.flatId;
@@ -189,7 +172,6 @@ function subscribeDeliveries() {
     })
     .subscribe();
 }
-
 async function approveVisitor(logId, decision) {
   const res = await apiFetch(`/visitors/${logId}/approve`, {
     method: 'PATCH',
@@ -200,7 +182,6 @@ async function approveVisitor(logId, decision) {
     loadDashboard();
   }
 }
-
 function visitorCard(v, withActions = false) {
   return `
     <div class="visitor-card">
@@ -217,12 +198,10 @@ function visitorCard(v, withActions = false) {
       </div>` : ''}
     </div>`;
 }
-
 // ── Visitors list ─────────────────────────────────────────────────────────
 async function loadVisitors() {
   showVisitorTab('invites');
 }
-
 function showVisitorTab(tab) {
   const invPanel  = document.getElementById('visitors-invites-panel');
   const histPanel = document.getElementById('visitors-history-panel');
@@ -242,7 +221,6 @@ function showVisitorTab(tab) {
     loadVisitorHistory();
   }
 }
-
 async function loadInvites() {
   const res  = await apiFetch('/visitors/invites');
   const data = res.ok ? await res.json() : [];
@@ -273,14 +251,12 @@ async function loadInvites() {
       }).join('')
     : '<p style="color:var(--muted);text-align:center;padding:20px">No active invites — click <strong>+ Invite Guest</strong> to create one</p>';
 }
-
 async function cancelInvite(id) {
   if (!confirm('Cancel this invite?')) return;
   const res = await apiFetch(`/visitors/invites/${id}`, { method: 'DELETE' });
   if (res.ok) { toast('Invite cancelled', 'success'); loadInvites(); }
   else toast('Failed to cancel', 'error');
 }
-
 async function loadVisitorHistory() {
   const res  = await apiFetch('/visitors/');
   const data = res.ok ? await res.json() : [];
@@ -288,7 +264,6 @@ async function loadVisitorHistory() {
     ? data.map(v => visitorCard(v)).join('')
     : '<p style="color:var(--muted);text-align:center;padding:20px">No visitor history</p>';
 }
-
 async function createInvite() {
   const body = {
     visitor_name:  document.getElementById('inv-name').value.trim(),
@@ -313,7 +288,6 @@ async function createInvite() {
     toast(e.error || 'Failed', 'error');
   }
 }
-
 // ── Deliveries ────────────────────────────────────────────────────────────
 async function loadDeliveries() {
   const res = await apiFetch('/delivery/');
@@ -341,12 +315,10 @@ async function loadDeliveries() {
       </table></div>`
     : '<p style="color:var(--muted);text-align:center;padding:20px">No deliveries</p>';
 }
-
 async function allowDelivery(id) {
   const res = await apiFetch(`/delivery/${id}/allow`, { method: 'PATCH', body: '{}' });
   if (res.ok) { toast('Delivery allowed!', 'success'); loadDeliveries(); }
 }
-
 // ── Helpers ───────────────────────────────────────────────────────────────
 async function loadHelpers() {
   const res = await apiFetch('/domestic-help/');
@@ -364,7 +336,6 @@ async function loadHelpers() {
       </div>`).join('')
     : '<p style="color:var(--muted);text-align:center;padding:20px">No helpers added yet</p>';
 }
-
 async function addHelper() {
   const body = {
     name:        document.getElementById('h-name').value.trim(),
@@ -383,17 +354,14 @@ async function addHelper() {
     toast(e.error || 'Failed', 'error');
   }
 }
-
 // ── SOS ───────────────────────────────────────────────────────────────────
 function triggerSOS() { openModal('modal-sos-confirm'); }
-
 async function confirmSOS() {
   closeModal('modal-sos-confirm');
   const res = await apiFetch('/security-alerts/sos', { method: 'POST', body: '{}' });
   if (res.ok) toast('🚨 Alert sent! Guards notified.', 'error');
   else toast('Failed to send alert', 'error');
 }
-
 // ── Community ─────────────────────────────────────────────────────────────
 async function loadNotices() {
   const res = await apiFetch('/community/notices');
@@ -411,12 +379,10 @@ async function loadNotices() {
       </div>`).join('')
     : '<p style="color:var(--muted);text-align:center;padding:20px">No notices</p>';
 }
-
 async function ackNotice(id) {
   await apiFetch(`/community/notices/${id}/acknowledge`, { method: 'POST', body: '{}' });
   toast('Acknowledged', 'success');
 }
-
 async function loadPolls() {
   const res = await apiFetch('/community/polls');
   const data = res.ok ? await res.json() : [];
@@ -430,13 +396,11 @@ async function loadPolls() {
       </div>`).join('')
     : '<p style="color:var(--muted);text-align:center;padding:20px">No polls</p>';
 }
-
 async function votePoll(pollId, optionId) {
   const res = await apiFetch(`/community/polls/${pollId}/vote`, { method: 'POST', body: JSON.stringify({ option_id: optionId }) });
   if (res.ok) toast('Vote recorded!', 'success');
   else { const e = await res.json(); toast(e.error || 'Failed', 'error'); }
 }
-
 async function loadEvents() {
   const res = await apiFetch('/community/events');
   const data = res.ok ? await res.json() : [];
@@ -449,12 +413,10 @@ async function loadEvents() {
       </div>`).join('')
     : '<p style="color:var(--muted);text-align:center;padding:20px">No events</p>';
 }
-
 async function rsvpEvent(id, status) {
   await apiFetch(`/community/events/${id}/rsvp`, { method: 'POST', body: JSON.stringify({ status }) });
   toast('RSVP saved!', 'success');
 }
-
 async function loadForum() {
   const res = await apiFetch('/community/forum');
   const data = res.ok ? await res.json() : [];
@@ -467,7 +429,6 @@ async function loadForum() {
       </div>`).join('')
     : '<p style="color:var(--muted);text-align:center;padding:20px">No forum threads</p>';
 }
-
 // ── Profile ───────────────────────────────────────────────────────────────
 async function saveProfile() {
   const body = {
@@ -480,21 +441,17 @@ async function saveProfile() {
     toast('Profile saved!', 'success');
   } else toast('Failed to save', 'error');
 }
-
 // Pre-fill profile page when navigated to
 document.querySelectorAll('[data-page="page-profile"]')?.forEach(el => el.addEventListener('click', () => {
   if (_myProfile.full_name) document.getElementById('profile-name').value = _myProfile.full_name || '';
   if (_myProfile.email)     document.getElementById('profile-email').value  = _myProfile.email || '';
 }));
-
 async function toggleKidsCheckout(enabled) {
   await apiFetch('/kids-checkout/toggle', { method: 'POST', body: JSON.stringify({ enabled }) });
   toast(enabled ? 'Kids Checkout enabled' : 'Kids Checkout disabled', 'success');
 }
-
 // ── Vehicles ──────────────────────────────────────────────────────────────
 let _flatData = null;
-
 async function loadMyVehicles() {
   const [vRes, profRes] = await Promise.all([
     apiFetch('/vehicles/'),
@@ -503,12 +460,10 @@ async function loadMyVehicles() {
   const vehicles = vRes.ok   ? await vRes.json()   : [];
   const profile  = profRes.ok ? await profRes.json() : {};
   _flatData = profile;
-
   const cars   = vehicles.filter(v => v.vehicle_type === 'car'    && v.status === 'active');
   const bikes  = vehicles.filter(v => ['bike','scooter'].includes(v.vehicle_type) && v.status === 'active');
   const maxCar = profile.max_cars        || '?';
   const maxTw  = profile.max_two_wheelers || '?';
-
   document.getElementById('vehicle-slot-bar').innerHTML = `
     <div style="display:flex;gap:12px;flex-wrap:wrap">
       <div class="card" style="flex:1;min-width:130px;text-align:center;padding:12px">
@@ -520,7 +475,6 @@ async function loadMyVehicles() {
         <div style="font-size:.8rem;color:var(--muted);margin-top:2px">Two-Wheeler Slots</div>
       </div>
     </div>`;
-
   document.getElementById('vehicles-list').innerHTML = vehicles.length
     ? vehicles.map(v => `
       <div class="card" style="margin-bottom:12px;display:flex;align-items:center;gap:12px">
@@ -536,7 +490,6 @@ async function loadMyVehicles() {
       </div>`).join('')
     : '<p style="color:var(--muted);text-align:center;padding:20px">No vehicles registered yet</p>';
 }
-
 async function addVehicle() {
   const plate = document.getElementById('v-plate').value.trim().toUpperCase();
   const type  = document.getElementById('v-type').value;
@@ -553,14 +506,12 @@ async function addVehicle() {
     toast(e.error || 'Failed', 'error');
   }
 }
-
 async function markVehicleSold(vehicleId) {
   if (!confirm('Mark this vehicle as sold/transferred? It will be removed from your slot count.')) return;
   const res = await apiFetch(`/vehicles/${vehicleId}`, { method: 'PATCH', body: JSON.stringify({ status: 'sold' }) });
   if (res.ok) { toast('Vehicle status updated', 'success'); loadMyVehicles(); }
   else toast('Failed', 'error');
 }
-
 // ── Billing ───────────────────────────────────────────────────────────────
 async function loadBilling() {
   const res = await apiFetch('/billing/invoices');
@@ -577,6 +528,5 @@ async function loadBilling() {
       </table></div>`
     : '<p style="color:var(--muted);text-align:center;padding:20px">No invoices</p>';
 }
-
 // Trigger billing load when page nav is clicked
 document.querySelectorAll('[data-page="page-billing"]')?.forEach(el => el.addEventListener('click', loadBilling));
