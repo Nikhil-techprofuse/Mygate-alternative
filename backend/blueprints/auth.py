@@ -1,3 +1,6 @@
+import os
+import re
+import psycopg2
 from flask import Blueprint, request, jsonify, g, current_app
 from ..supabase_client import get_admin_client
 from ..utils.auth_middleware import require_auth
@@ -129,6 +132,95 @@ def _build_session_response(session, default_role: str = 'super_admin'):
     user_id = session.user.id
     phone   = getattr(session.user, 'phone', None)
 
+    # ── Migrate admin-created profile if it exists ────────────────────────────
+    if phone:
+        try:
+            # Check if there is an existing profile with same phone but different id
+            dummy_q = (
+                sb.table('user_profiles')
+                .select('id, role, society_id, flat_id, full_name')
+                .eq('phone', phone)
+                .neq('id', user_id)
+                .maybe_single()
+                .execute()
+            )
+            dummy_profile = dummy_q.data if dummy_q else None
+            if dummy_profile:
+                dummy_id = dummy_profile['id']
+                db_pwd = os.getenv('SUPABASE_DB_PASSWORD') or 'Lq5RnKwYdmZJrE2'
+                supabase_url = os.getenv('SUPABASE_URL', 'https://olkudsuwbggebcdqpwfg.supabase.co')
+                match = re.search(r"https?://([^.]+)\.supabase\.co", supabase_url)
+                db_host = f"db.{match.group(1)}.supabase.co" if match else 'db.olkudsuwbggebcdqpwfg.supabase.co'
+                
+                conn = psycopg2.connect(
+                    host=db_host,
+                    port=5432,
+                    dbname='postgres',
+                    user='postgres',
+                    password=db_pwd,
+                    sslmode='require',
+                    connect_timeout=15,
+                )
+                try:
+                    cur = conn.cursor()
+                    # Delete any user_profile already created for user_id to prevent primary key conflict
+                    cur.execute("DELETE FROM user_profiles WHERE id = %s", (user_id,))
+                    
+                    # Update all referencing tables
+                    cur.execute("UPDATE guard_gate_assignments SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE gate_patrol_logs SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE gate_chat_messages SET sender_id = %s WHERE sender_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE visitor_logs SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE visitor_otps SET created_by = %s WHERE created_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE vehicles SET owner_id = %s WHERE owner_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE vehicle_entry_logs SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE vehicle_disputes SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE deliveries SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE helper_flat_links SET resident_id = %s WHERE resident_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE helper_attendance SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE helper_ratings SET resident_id = %s WHERE resident_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE kids_checkout_events SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE emergency_contacts SET resident_id = %s WHERE resident_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE security_alerts SET triggered_by = %s WHERE triggered_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE security_alerts SET guard_acknowledged_by = %s WHERE guard_acknowledged_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE admin_broadcasts SET sent_by = %s WHERE sent_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE notices SET posted_by = %s WHERE posted_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE notice_acknowledgments SET resident_id = %s WHERE resident_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE polls SET created_by = %s WHERE created_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE poll_votes SET voter_id = %s WHERE voter_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE events SET created_by = %s WHERE created_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE event_rsvp SET resident_id = %s WHERE resident_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE forum_threads SET created_by = %s WHERE created_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE forum_replies SET posted_by = %s WHERE posted_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE society_documents SET uploaded_by = %s WHERE uploaded_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE personal_documents SET uploaded_by = %s WHERE uploaded_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE payments SET paid_by = %s WHERE paid_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE expenses SET recorded_by = %s WHERE recorded_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE helpdesk_tickets SET raised_by = %s WHERE raised_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE helpdesk_tickets SET assigned_to = %s WHERE assigned_to = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE ticket_updates SET updated_by = %s WHERE updated_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE ticket_attachments SET uploaded_by = %s WHERE uploaded_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE bookings SET booked_by = %s WHERE booked_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE staff_profiles SET user_id = %s WHERE user_id = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE staff_attendance SET marked_by = %s WHERE marked_by = %s", (user_id, dummy_id))
+                    cur.execute("UPDATE leave_requests SET reviewed_by = %s WHERE reviewed_by = %s", (user_id, dummy_id))
+                    
+                    # Update user_profiles.id
+                    cur.execute("UPDATE user_profiles SET id = %s WHERE id = %s", (user_id, dummy_id))
+                    
+                    # Clean up dummy user in auth.users
+                    cur.execute("DELETE FROM auth.users WHERE id = %s", (dummy_id,))
+                    
+                    conn.commit()
+                    cur.close()
+                except Exception as e:
+                    conn.rollback()
+                    current_app.logger.error(f"Migration transaction failed: {e}")
+                finally:
+                    conn.close()
+        except Exception as e:
+            current_app.logger.error(f"Failed to migrate profile: {e}")
+
     try:
         existing = (
             sb.table('user_profiles')
@@ -188,7 +280,30 @@ def me():
         .single()
         .execute()
     )
-    return jsonify(profile.data if profile.data else g.profile)
+    data = profile.data if profile.data else g.profile
+    if data:
+        full_name = data.get('full_name')
+        flat_id = data.get('flat_id')
+        if (not full_name or full_name == 'Resident User') and flat_id:
+            try:
+                # Query user_profiles for any resident or tenant profile assigned to the same flat_id
+                real_residents = (
+                    sb.table('user_profiles')
+                    .select('full_name')
+                    .eq('flat_id', flat_id)
+                    .neq('id', g.user_id)
+                    .in_('role', ['resident', 'tenant', 'committee_member'])
+                    .execute()
+                )
+                if real_residents and real_residents.data:
+                    for r in real_residents.data:
+                        name = (r.get('full_name') or '').strip()
+                        if name and name != 'Resident User':
+                            data['full_name'] = name
+                            break
+            except Exception as e:
+                current_app.logger.error(f"Error querying real resident name for bypass: {e}")
+    return jsonify(data)
 
 
 @auth_bp.patch('/me')

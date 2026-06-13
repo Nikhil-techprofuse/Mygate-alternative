@@ -18,6 +18,13 @@ function showFlatSelection() {
     }
     _flatSelectionProfile = await res.json();
 
+    // Pre-populate name in topbar if we already have it from a previous session
+    if (_flatSelectionProfile?.full_name) {
+      const nameEl = document.getElementById('user-name-text');
+      if (nameEl) nameEl.textContent = _flatSelectionProfile.full_name;
+      populateProfileDropdown(_flatSelectionProfile);
+    }
+
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('flat-selection-screen').style.display = 'flex';
     await loadFlatSelectionOptions();
@@ -105,6 +112,19 @@ async function confirmFlatSelection() {
   }
 
   localStorage.setItem((window.MG_PORTAL || 'mg') + '_flat_id', flatId);
+
+  // Fetch fresh profile now that flat_id is set — the name bypass runs on this call
+  try {
+    const profRes = await apiFetch('/auth/me');
+    if (profRes.ok) {
+      const freshProfile = await profRes.json();
+      const name = freshProfile.full_name || _flatSelectionProfile?.full_name || 'Resident';
+      const nameEl = document.getElementById('user-name-text');
+      if (nameEl) nameEl.textContent = name;
+      populateProfileDropdown({ ...freshProfile, full_name: name });
+    }
+  } catch (_) { /* non-fatal */ }
+
   document.getElementById('flat-selection-screen').style.display = 'none';
   document.getElementById('app-shell').style.display = 'block';
   loadDashboard();
@@ -194,7 +214,8 @@ async function loadDashboard() {
     ? (_myProfile.flats.buildings?.name ? `${_myProfile.flats.buildings.name} – ${_myProfile.flats.flat_number}` : _myProfile.flats.flat_number)
     : '—';
 
-  document.getElementById('user-name-display').textContent = _myProfile.full_name || 'Profile';
+  document.getElementById('user-name-text').textContent = _myProfile.full_name || 'Profile';
+  populateProfileDropdown(_myProfile);
   if (_myProfile.kids_checkout_enabled !== undefined) {
     document.getElementById('kids-checkout-toggle').checked = _myProfile.kids_checkout_enabled;
   }
@@ -219,6 +240,42 @@ async function loadDashboard() {
     ? gateDeliveries.map(d => deliveryOTPCard(d)).join('')
     : '<p style="color:var(--muted);font-size:.9rem;text-align:center;padding:12px">No deliveries left at gate</p>';
 }
+
+// ── Profile Dropdown ──────────────────────────────────────────────────────
+function toggleProfileDropdown() {
+  const dd = document.getElementById('profile-dropdown');
+  const isOpen = dd.style.display === 'block';
+  dd.style.display = isOpen ? 'none' : 'block';
+}
+
+function populateProfileDropdown(profile) {
+  if (!profile) return;
+  // Name
+  const name = profile.full_name || 'Resident';
+  document.getElementById('pd-name').textContent = name;
+  // Avatar initials
+  const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  document.getElementById('profile-avatar').textContent = initials || '?';
+  // Role
+  document.getElementById('pd-role').textContent = (profile.role || 'resident').replace('_', ' ');
+  // Phone
+  document.getElementById('pd-phone').textContent = profile.phone || '—';
+  // Flat
+  const flat = profile.flats;
+  const flatLabel = flat?.flat_number
+    ? (flat.buildings?.name ? `${flat.buildings.name} – ${flat.flat_number}` : flat.flat_number)
+    : '—';
+  document.getElementById('pd-flat').textContent = flatLabel;
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+  const dd = document.getElementById('profile-dropdown');
+  const btn = document.getElementById('user-name-display');
+  if (dd && btn && !dd.contains(e.target) && !btn.contains(e.target)) {
+    dd.style.display = 'none';
+  }
+});
 
 function openInviteModal() {
   const flat = _myProfile.flats;
@@ -688,8 +745,8 @@ async function loadForum() {
 // ── Profile ───────────────────────────────────────────────────────────────
 async function saveProfile() {
   const body = {
-    full_name: document.getElementById('profile-name').value.trim(),
-    email:     document.getElementById('profile-email').value.trim(),
+    full_name: (_myProfile.full_name || '').trim(),
+    email:     (_myProfile.email    || '').trim(),
   };
   const res = await apiFetch('/auth/me', { method: 'PATCH', body: JSON.stringify(body) });
   if (res.ok) {
@@ -698,11 +755,8 @@ async function saveProfile() {
   } else toast('Failed to save', 'error');
 }
 
-// Pre-fill profile page when navigated to
-document.querySelectorAll('[data-page="page-profile"]')?.forEach(el => el.addEventListener('click', () => {
-  if (_myProfile.full_name) document.getElementById('profile-name').value = _myProfile.full_name || '';
-  if (_myProfile.email)     document.getElementById('profile-email').value  = _myProfile.email || '';
-}));
+// Pre-fill removed — profile is now shown in dropdown only
+
 
 async function toggleKidsCheckout(enabled) {
   await apiFetch('/kids-checkout/toggle', { method: 'POST', body: JSON.stringify({ enabled }) });
