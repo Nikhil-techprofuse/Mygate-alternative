@@ -151,7 +151,6 @@ async function loadSocietySetup() {
         </div>`).join('')
     : '<p style="color:var(--muted);font-size:.875rem">No gates yet</p>';
 
-  // Wire up preview on the building inputs
   ['new-building-floors', 'new-building-fpf'].forEach(id => {
     const el = document.getElementById(id);
     if (el && !el._previewBound) {
@@ -189,7 +188,6 @@ async function createSociety() {
   });
   if (!res.ok) return toast((await res.json()).error || 'Failed', 'error');
   const society = await res.json();
-  // Persist the new society_id so all subsequent API calls use it
   localStorage.setItem('adm_society_id', society.id);
   toast('Society created!', 'success');
   loadSocietySetup();
@@ -217,7 +215,6 @@ async function addBuilding() {
         : 'Building added',
       'success'
     );
-    // Reset all three fields
     document.getElementById('new-building-name').value   = '';
     document.getElementById('new-building-floors').value = '1';
     document.getElementById('new-building-fpf').value    = '0';
@@ -257,7 +254,6 @@ let residentsCache  = [];
 let _buildingsCache = [];
 let _editingResidentId = null;
 let _familyModalResidentId = null;
-// Pending family rows added in the modal (before resident is saved)
 let _pendingFamily = [];
 
 async function loadResidents() {
@@ -335,7 +331,6 @@ async function onBuildingChange() {
   const flatnoEl  = document.getElementById('res-flatno');
   const hint      = document.getElementById('res-flat-hint');
   if (!buildingId) { hint.textContent = ''; return; }
-  // Show a hint with existing flats in this building
   const res = await apiFetch(`/admin/flats?building_id=${buildingId}`);
   const flats = res.ok ? await res.json() : [];
   const bldg = _buildingsCache.find(b => b.id === buildingId);
@@ -355,7 +350,7 @@ async function openAddResidentModal() {
   document.getElementById('res-floor').value   = '';
   document.getElementById('res-flatno').value  = '';
   document.getElementById('res-flat-hint').textContent = '';
-  _buildingsCache = [];   // force refresh
+  _buildingsCache = [];
   await _loadBuildingsIntoSelect();
   _renderFamilyRows();
   document.getElementById('resident-modal').classList.add('open');
@@ -378,12 +373,10 @@ async function openEditResident(id) {
 
   _buildingsCache = [];
   await _loadBuildingsIntoSelect();
-  // Pre-select building
   if (flat?.building_id) {
     document.getElementById('res-building').value = flat.building_id;
     await onBuildingChange();
   }
-  // Load existing saved family members
   await _loadSavedFamilyForModal(id);
   document.getElementById('resident-modal').classList.add('open');
 }
@@ -393,11 +386,9 @@ function closeResidentModal() {
   _pendingFamily = [];
 }
 
-// ── Family rows inside the modal ───────────────────────────────────
 async function _loadSavedFamilyForModal(residentId) {
   const res = await apiFetch(`/admin/residents/${residentId}/family`);
   const saved = res.ok ? await res.json() : [];
-  // Mark saved members with an id so they can be deleted individually
   _pendingFamily = saved.map(m => ({ _saved: true, id: m.id, full_name: m.full_name, relation: m.relation || '', phone: m.phone || '' }));
   _renderFamilyRows();
 }
@@ -431,7 +422,6 @@ function _esc(s) { return (s || '').replace(/"/g, '&quot;'); }
 function addFamilyRow() {
   _pendingFamily.push({ full_name: '', relation: 'spouse', phone: '' });
   _renderFamilyRows();
-  // Focus the last name input
   const inputs = document.querySelectorAll('#family-rows-container input[type=text]');
   if (inputs.length) inputs[inputs.length - 1].focus();
 }
@@ -439,14 +429,12 @@ function addFamilyRow() {
 async function _removeFamilyRow(i) {
   const m = _pendingFamily[i];
   if (m._saved && m.id && _editingResidentId) {
-    // Delete from DB immediately
     await apiFetch(`/admin/family/${m.id}`, { method: 'DELETE' });
   }
   _pendingFamily.splice(i, 1);
   _renderFamilyRows();
 }
 
-// ── Save resident ──────────────────────────────────────────────────
 async function saveResident() {
   const name       = document.getElementById('res-name').value.trim();
   const phone      = document.getElementById('res-phone').value.trim();
@@ -460,7 +448,6 @@ async function saveResident() {
   if (!floor)      { toast('Floor number is required', 'error'); return; }
   if (!flatno)     { toast('Flat number is required', 'error'); return; }
 
-  // Validate pending family rows
   for (const m of _pendingFamily) {
     if (!m.full_name.trim()) { toast('All family member names are required', 'error'); return; }
   }
@@ -490,7 +477,6 @@ async function saveResident() {
   }
   if (_editingResidentId) savedId = _editingResidentId;
 
-  // Save any new (non-saved) family members
   const newMembers = _pendingFamily.filter(m => !m._saved);
   for (const m of newMembers) {
     if (m.full_name.trim()) {
@@ -513,7 +499,6 @@ async function deleteResident(id, name) {
   else toast('Failed to delete', 'error');
 }
 
-// ── Family Modal (from table row ─ view & manage) ──────────────────
 async function openFamilyModal(residentId, name) {
   _familyModalResidentId = residentId;
   document.getElementById('family-modal-title').textContent = `Family — ${name}`;
@@ -628,6 +613,9 @@ async function loadStaff() {
       <td>${s.name}</td><td>${s.role}</td><td>${s.shift || '—'}</td>
       <td>${s.phone || '—'}</td><td>₹${s.monthly_salary || 0}</td>
     </tr>`).join('');
+  
+  loadAuthorizedGuards();
+  loadGoogleGroupConfig();
 }
 
 async function addStaff() {
@@ -642,6 +630,253 @@ async function addStaff() {
   const res = await apiFetch('/staff/', { method: 'POST', body: JSON.stringify(body) });
   if (res.ok) { closeModal('modal-add-staff'); toast('Staff added', 'success'); loadStaff(); }
   else toast('Failed', 'error');
+}
+
+// ── Authorized Guards (Access Revocation & Google Group OAuth style) ───────
+async function loadAuthorizedGuards() {
+  const res = await apiFetch('/admin/authorized-guards');
+  const tableBody = document.getElementById('auth-guards-table');
+  if (!tableBody) return;
+  
+  if (!res.ok) {
+    const err = await res.json();
+    tableBody.innerHTML = `<tr><td colspan="6" style="color:var(--danger);text-align:center;padding:12px">
+      ⚠️ ${err.detail || 'Could not load authorized guards table.'}
+    </td></tr>`;
+    return;
+  }
+  
+  const data = await res.json();
+  tableBody.innerHTML = data.map(g => `
+    <tr>
+      <td>${g.name || '—'}</td>
+      <td style="font-family:monospace">${g.email}</td>
+      <td>${g.gate_id || '—'}</td>
+      <td>
+        <span class="badge badge-${g.active ? 'success' : 'danger'}">${g.active ? 'Active' : 'Deactivated'}</span>
+      </td>
+      <td>${fmtDate(g.last_login)}</td>
+      <td>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm btn-${g.active ? 'danger' : 'success'}" style="padding:2px 8px;font-size:.75rem" onclick="toggleAuthGuard('${g.id}', ${!g.active})">
+            ${g.active ? 'Deactivate' : 'Activate'}
+          </button>
+          <button class="btn btn-sm btn-ghost" style="padding:2px 8px;font-size:.75rem;color:var(--danger)" onclick="deleteAuthGuard('${g.id}')">
+            Remove
+          </button>
+        </div>
+      </td>
+    </tr>`).join('') || `<tr><td colspan="6" style="color:var(--muted);text-align:center;padding:12px">No guards authorized yet</td></tr>`;
+}
+
+async function addAuthGuard() {
+  const body = {
+    email:   document.getElementById('ag-email').value.trim(),
+    name:    document.getElementById('ag-name').value.trim(),
+    gate_id: document.getElementById('ag-gate').value.trim()
+  };
+  if (!body.email) return toast('Email address is required', 'error');
+  
+  const res = await apiFetch('/admin/authorized-guards', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+  if (res.ok) {
+    closeModal('modal-add-auth-guard');
+    document.getElementById('ag-email').value = '';
+    document.getElementById('ag-name').value = '';
+    document.getElementById('ag-gate').value = '';
+    toast('Guard authorized successfully ✓', 'success');
+    loadAuthorizedGuards();
+  } else {
+    const err = await res.json();
+    toast(err.error || 'Failed to authorize guard', 'error');
+  }
+}
+
+async function toggleAuthGuard(id, active) {
+  const res = await apiFetch(`/admin/authorized-guards/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ active })
+  });
+  if (res.ok) {
+    toast(`Guard ${active ? 'activated' : 'deactivated'} successfully`, 'success');
+    loadAuthorizedGuards();
+  } else {
+    toast('Failed to update guard status', 'error');
+  }
+}
+
+async function deleteAuthGuard(id) {
+  if (!confirm('Are you sure you want to remove authorization for this guard? They will lose access instantly.')) return;
+  const res = await apiFetch(`/admin/authorized-guards/${id}`, {
+    method: 'DELETE'
+  });
+  if (res.ok) {
+    toast('Guard authorization removed', 'success');
+    loadAuthorizedGuards();
+  } else {
+    toast('Failed to remove guard authorization', 'error');
+  }
+}
+
+// ── Google Group Settings & Integration JS ───────────────────────────────────
+let mockMembersCache = [];
+
+async function loadGoogleGroupConfig() {
+  const res = await apiFetch('/admin/google-group/config');
+  if (!res.ok) return;
+  
+  const data = await res.json();
+  document.getElementById('gg-email').value = data.group_email || '';
+  document.getElementById('gg-mode').value = data.integration_mode || 'mock';
+  
+  const saTextarea = document.getElementById('gg-sa-json');
+  if (data.has_service_account) {
+    saTextarea.placeholder = 'Service Account JSON Credentials Configured (Paste new JSON to update)';
+    saTextarea.value = '';
+  } else {
+    saTextarea.placeholder = '{"type": "service_account", ...}';
+    saTextarea.value = '';
+  }
+  
+  toggleGoogleGroupModeUI();
+}
+
+function toggleGoogleGroupModeUI() {
+  const mode = document.getElementById('gg-mode').value;
+  const badge = document.getElementById('sync-status-badge');
+  const mockCard = document.getElementById('mock-members-card');
+  const realSection = document.getElementById('real-service-account-section');
+  const realInfo = document.getElementById('real-api-info-card');
+  
+  if (mode === 'mock') {
+    badge.textContent = 'Mock Mode (Simulation)';
+    badge.className = 'badge badge-info';
+    mockCard.style.display = 'block';
+    realSection.style.display = 'none';
+    realInfo.style.display = 'none';
+    loadMockMembers();
+  } else {
+    badge.textContent = 'Real API Mode';
+    badge.className = 'badge badge-success';
+    mockCard.style.display = 'none';
+    realSection.style.display = 'block';
+    realInfo.style.display = 'block';
+  }
+}
+
+async function saveGoogleGroupSettings() {
+  const body = {
+    group_email: document.getElementById('gg-email').value.trim(),
+    integration_mode: document.getElementById('gg-mode').value,
+    service_account_json: document.getElementById('gg-sa-json').value.trim()
+  };
+  
+  if (!body.group_email) return toast('Google Group Email is required', 'error');
+  
+  const res = await apiFetch('/admin/google-group/config', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+  
+  if (res.ok) {
+    toast('Google Group settings saved ✓', 'success');
+    loadGoogleGroupConfig();
+  } else {
+    const err = await res.json();
+    toast(err.error || 'Failed to save configuration', 'error');
+  }
+}
+
+async function syncGoogleGroupNow() {
+  toast('Syncing Google Group members...', 'info');
+  const res = await apiFetch('/admin/google-group/sync', { method: 'POST' });
+  if (res.ok) {
+    const data = await res.json();
+    let msg = 'Sync complete! ';
+    if (data.added && data.added.length) msg += `Added: ${data.added.length} `;
+    if (data.deactivated && data.deactivated.length) msg += `Deactivated: ${data.deactivated.length} `;
+    if (data.activated && data.activated.length) msg += `Re-activated: ${data.activated.length} `;
+    if (!data.added?.length && !data.deactivated?.length && !data.activated?.length) msg += 'No changes.';
+    toast(msg, 'success');
+    loadAuthorizedGuards();
+  } else {
+    const err = await res.json();
+    toast(err.error || 'Sync failed', 'error');
+  }
+}
+
+async function loadMockMembers() {
+  const res = await apiFetch('/admin/google-group/mock-members');
+  if (!res.ok) return;
+  mockMembersCache = await res.json();
+  renderMockMembers(mockMembersCache);
+}
+
+function renderMockMembers(data) {
+  const tbody = document.getElementById('mock-members-table');
+  if (!tbody) return;
+  
+  if (!data.length) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:8px">No mock members. Click "+ Add Member" to simulate the Google Group.</td></tr>`;
+    return;
+  }
+  
+  tbody.innerHTML = data.map(m => `
+    <tr>
+      <td style="font-family:monospace;padding:6px">${m.email}</td>
+      <td style="padding:6px">${m.name || '—'}</td>
+      <td style="padding:6px">${m.gate_id || 'GATE-A'}</td>
+      <td style="padding:6px;text-align:right">
+        <button class="btn btn-sm btn-ghost" style="padding:1px 6px;color:var(--danger);font-size:0.75rem" onclick="deleteMockMember('${m.email}')">✕</button>
+      </td>
+    </tr>`).join('');
+}
+
+async function addMockMemberToList() {
+  const email = document.getElementById('mm-email').value.trim();
+  const name = document.getElementById('mm-name').value.trim();
+  const gate_id = document.getElementById('mm-gate').value.trim();
+  
+  if (!email) return toast('Email is required', 'error');
+  
+  const newMember = { email, name, gate_id };
+  const updatedList = [...mockMembersCache.filter(m => m.email !== email), newMember];
+  
+  const res = await apiFetch('/admin/google-group/mock-members', {
+    method: 'POST',
+    body: JSON.stringify(updatedList)
+  });
+  
+  if (res.ok) {
+    closeModal('modal-add-mock-member');
+    document.getElementById('mm-email').value = '';
+    document.getElementById('mm-name').value = '';
+    document.getElementById('mm-gate').value = 'GATE-A';
+    toast('Mock member added successfully ✓', 'success');
+    loadMockMembers();
+  } else {
+    const err = await res.json();
+    toast(err.error || 'Failed to add mock member', 'error');
+  }
+}
+
+async function deleteMockMember(email) {
+  if (!confirm(`Remove ${email} from Mock Google Group?`)) return;
+  
+  const updatedList = mockMembersCache.filter(m => m.email !== email);
+  const res = await apiFetch('/admin/google-group/mock-members', {
+    method: 'POST',
+    body: JSON.stringify(updatedList)
+  });
+  
+  if (res.ok) {
+    toast('Mock member removed', 'success');
+    loadMockMembers();
+  } else {
+    toast('Failed to remove mock member', 'error');
+  }
 }
 
 // ── Billing ───────────────────────────────────────────────────────────────
