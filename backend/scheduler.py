@@ -6,14 +6,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
-import logging
-
-logger = logging.getLogger(__name__)
-
-
 def check_delivery_overstay(app):
     """Fires every 5 min — marks deliveries that have overstayed and sets alert flag."""
     try:
@@ -118,20 +110,6 @@ def generate_monthly_invoices(app):
         logger.warning(f'generate_monthly_invoices skipped: {e}')
 
 
-def cleanup_expired_visitor_invites(app):
-    """Every 15 min — remove visitor OTP invites past valid_until."""
-    try:
-        with app.app_context():
-            from .supabase_client import get_admin_client
-            from .blueprints.visitors import cleanup_expired_visitor_otps
-            sb = get_admin_client()
-            count = cleanup_expired_visitor_otps(sb)
-            if count:
-                logger.info(f'Removed {count} expired visitor OTP invite(s)')
-    except Exception as e:
-        logger.warning(f'cleanup_expired_visitor_invites skipped: {e}')
-
-
 def cancel_unpaid_bookings(app):
     """Every 35 min — cancel amenity bookings not paid within 30 min."""
     try:
@@ -152,6 +130,15 @@ def cancel_unpaid_bookings(app):
                 logger.info(f'Booking auto-cancelled: {b["id"]}')
     except Exception as e:
         logger.warning(f'cancel_unpaid_bookings skipped: {e}')
+
+
+def sync_google_group_job(app):
+    """Fires every 1 min — syncs Google Group members to database."""
+    try:
+        from .utils.google_groups import sync_google_group_to_db
+        sync_google_group_to_db(app)
+    except Exception as e:
+        logger.warning(f'sync_google_group_job skipped: {e}')
 
 
 def init_scheduler(app):
@@ -182,9 +169,9 @@ def init_scheduler(app):
         replace_existing=True,
     )
     scheduler.add_job(
-        func=lambda: cleanup_expired_visitor_invites(app),
-        trigger=IntervalTrigger(minutes=15),
-        id='cleanup_expired_visitor_invites',
+        func=lambda: sync_google_group_job(app),
+        trigger=IntervalTrigger(minutes=1),
+        id='google_group_sync',
         replace_existing=True,
     )
 
