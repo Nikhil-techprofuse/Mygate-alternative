@@ -14,6 +14,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
+
 <!-- Login -->
 <div id="login-screen" class="login-wrap">
   <div class="login-card">
@@ -23,6 +24,7 @@
       <button class="btn" id="btn-phone-tab" onclick="switchLoginTab('phone')" style="flex:1;padding:6px;font-size:.85rem;background:var(--accent);color:var(--accent-foreground)">📱 Phone OTP</button>
       <button class="btn btn-ghost" id="btn-email-tab" onclick="switchLoginTab('email')" style="flex:1;padding:6px;font-size:.85rem">✉️ Email / Google</button>
     </div>
+
     <div id="step-phone">
       <div class="form-group"><label>Mobile Number</label>
         <input id="inp-phone" class="form-control" type="tel" placeholder="+91 98765 43210">
@@ -32,6 +34,7 @@
         <strong>Dev credentials</strong><br>Phone: <code>+911111111111</code>&nbsp;&nbsp;OTP: <code>111111</code>
       </div>
     </div>
+
     <div id="step-email" style="display:none">
       <div class="form-group"><label>Email Address</label>
         <input id="inp-email" class="form-control" type="email" placeholder="guard@gmail.com">
@@ -48,16 +51,18 @@
         <strong>Dev credentials</strong><br>Email: <code>guard1@gmail.com</code>
       </div>
     </div>
+
     <div id="step-otp" style="display:none">
       <p style="margin-bottom:16px;font-size:.9rem;color:var(--muted)">OTP sent to <strong id="otp-phone-display"></strong></p>
       <div class="form-group"><label>OTP</label>
-        <input id="inp-otp" class="form-control big-otp-input" type="text" placeholder="000000" maxlength="6" pattern="[0-9]*" inputmode="numeric">
+        <input id="inp-otp" class="form-control big-otp-input" type="number" placeholder="000000" maxlength="6">
       </div>
       <button class="btn btn-primary btn-full btn-lg" onclick="verifyOtp()">Login</button>
       <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="resetLogin()">← Back</button>
     </div>
   </div>
 </div>
+
 <!-- App Shell -->
 <div id="app-shell" style="display:none">
   <div class="topbar">
@@ -68,7 +73,9 @@
       <button class="theme-toggle-btn" onclick="logout()" title="Logout" style="background:transparent;border:none;color:var(--text);font-size:1.1rem;cursor:pointer">🚪</button>
     </div>
   </div>
+
   <div style="padding:12px 12px 72px">
+
     <!-- Dashboard -->
     <div id="page-dashboard" class="page active">
       <div id="active-alerts"></div>
@@ -82,17 +89,20 @@
         <div id="recent-entries"></div>
       </div>
     </div>
+
     <!-- Visitor Entry -->
     <div id="page-visitor-entry" class="page">
       <h2 class="page-title">Visitor Entry</h2>
+
       <div class="card" style="margin-bottom:12px">
         <div class="card-header">Verify OTP Invite</div>
         <div class="form-group">
-          <input id="otp-scan-input" class="form-control big-otp-input" type="text" placeholder="Enter OTP" pattern="[0-9]*" inputmode="numeric">
+          <input id="otp-scan-input" class="form-control big-otp-input" type="number" placeholder="Enter OTP">
         </div>
         <button class="btn btn-primary btn-full" onclick="verifyVisitorOtp()">Verify OTP</button>
         <div id="otp-result" style="margin-top:12px"></div>
       </div>
+
       <div class="card">
         <div class="card-header">Walk-in Visitor</div>
         <div class="form-group"><label>Visitor Name *</label>
@@ -113,9 +123,11 @@
         <button class="btn btn-primary btn-full" onclick="logWalkin()">Log Entry & Notify Resident</button>
       </div>
     </div>
+
     <!-- Vehicle -->
     <div id="page-vehicle" class="page">
       <h2 class="page-title">Vehicle Entry</h2>
+
       <div class="card" style="margin-bottom:12px">
         <div class="card-header">Log Entry</div>
         <div class="form-group"><label>Number Plate *</label>
@@ -127,6 +139,7 @@
         </div>
         <div id="plate-result" style="margin-top:12px"></div>
       </div>
+
       <div class="card" style="margin-bottom:12px">
         <div class="card-header">Log Exit</div>
         <div class="form-group"><label>Number Plate</label>
@@ -135,11 +148,13 @@
         <button class="btn btn-success btn-full" onclick="logVehicleExitByPlate()">Log Exit ↙</button>
         <div id="exit-result" style="margin-top:12px"></div>
       </div>
+
       <div class="card">
         <div class="card-header">Today's Vehicles</div>
         <div id="vehicle-entries-list"><p style="text-align:center;padding:12px;color:var(--muted)">Loading...</p></div>
       </div>
     </div>
+
     <!-- Delivery -->
     <div id="page-delivery" class="page">
       <h2 class="page-title">Delivery</h2>
@@ -160,19 +175,21 @@
         </div>
         <button class="btn btn-primary btn-full" onclick="logDelivery()">Log Delivery</button>
       </div>
+
       <div class="card">
         <div class="card-header">Collect Parcel (OTP)</div>
         <div class="form-group"><input id="parcel-delivery-id" class="form-control" type="text" placeholder="Delivery ID / Tracking ID"></div>
-        <div class="form-group"><input id="parcel-otp-input" class="form-control big-otp-input" type="text" placeholder="OTP" pattern="[0-9]*" inputmode="numeric"></div>
+        <div class="form-group"><input id="parcel-otp-input" class="form-control big-otp-input" type="number" placeholder="OTP"></div>
         <button class="btn btn-success btn-full" onclick="collectParcel()">Verify & Collect</button>
       </div>
     </div>
+
     <!-- Domestic Help -->
     <div id="page-helpers" class="page">
       <h2 class="page-title">Daily Help</h2>
       <div class="card">
         <div class="form-group">
-          <input id="helper-passcode" class="form-control big-otp-input" type="text" placeholder="Enter Passcode" pattern="[0-9]*" inputmode="numeric">
+          <input id="helper-passcode" class="form-control big-otp-input" type="number" placeholder="Enter Passcode">
         </div>
         <button class="btn btn-primary btn-full" onclick="lookupHelper()">Verify Helper</button>
         <div id="helper-result" style="margin-top:12px"></div>
@@ -181,6 +198,7 @@
         </div>
       </div>
     </div>
+
     <!-- Kids Checkout -->
     <div id="page-kids" class="page">
       <h2 class="page-title">Kids Checkout</h2>
@@ -192,7 +210,9 @@
         <div id="kids-result" style="margin-top:12px"></div>
       </div>
     </div>
+
   </div>
+
   <nav class="bottom-nav">
     <a href="#" data-page="page-dashboard"     onclick="showPage('page-dashboard');loadGuardDashboard()"><span class="icon">🏠</span>Home</a>
     <a href="#" data-page="page-visitor-entry" onclick="showPage('page-visitor-entry');loadFlatsList()"><span class="icon">👤</span>Visitor</a>
@@ -201,7 +221,9 @@
     <a href="#" data-page="page-helpers"       onclick="showPage('page-helpers')"><span class="icon">🧹</span>Help</a>
   </nav>
 </div>
+
 <div id="toast-container"></div>
+
 <script>window.MG_PORTAL = 'grd';</script>
 <script src="/frontend/shared/api.js"></script>
 <script src="/frontend/guard/js/guard.js"></script>
