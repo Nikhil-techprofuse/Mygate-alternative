@@ -1,8 +1,10 @@
 // ── Guard Portal JS ───────────────────────────────────────────────────────
+
 window.addEventListener('DOMContentLoaded', () => {
   if (Auth.isLoggedIn()) {
     showApp();
   }
+
   // Handle Supabase OAuth / Magic Link redirects
   if (typeof sb !== 'undefined') {
     sb.auth.onAuthStateChange(async (event, session) => {
@@ -34,6 +36,7 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
 function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-shell').style.display    = 'block';
@@ -41,17 +44,21 @@ function showApp() {
   subscribeAlerts();
   subscribeVisitorQueue();
 }
+
 function resetLogin() {
   document.getElementById('step-phone').style.display = 'block';
   document.getElementById('step-otp').style.display   = 'none';
 }
+
 function switchLoginTab(tab) {
   const phoneBtn = document.getElementById('btn-phone-tab');
   const emailBtn = document.getElementById('btn-email-tab');
   const phoneForm = document.getElementById('step-phone');
   const emailForm = document.getElementById('step-email');
   const otpForm = document.getElementById('step-otp');
+
   otpForm.style.display = 'none';
+
   if (tab === 'phone') {
     phoneForm.style.display = 'block';
     emailForm.style.display = 'none';
@@ -72,6 +79,7 @@ function switchLoginTab(tab) {
     phoneBtn.style.color = '';
   }
 }
+
 // ── Auth ──────────────────────────────────────────────────────────────────
 async function sendOtp() {
   const phone = document.getElementById('inp-phone').value.trim();
@@ -87,6 +95,7 @@ async function sendOtp() {
     toast('OTP sent!', 'success');
   } else toast('Failed to send OTP', 'error');
 }
+
 async function verifyOtp() {
   const phone = document.getElementById('inp-phone').value.trim();
   const token = document.getElementById('inp-otp').value.trim();
@@ -103,6 +112,7 @@ async function verifyOtp() {
     showApp();
   } else toast(data.error || 'Invalid OTP', 'error');
 }
+
 async function sendMagicLink() {
   const email = document.getElementById('inp-email').value.trim();
   if (!email) return toast('Enter email address', 'error');
@@ -119,6 +129,7 @@ async function sendMagicLink() {
     toast(data.error || 'Failed to send magic link', 'error');
   }
 }
+
 async function loginWithGoogle() {
   if (typeof sb === 'undefined') return toast('Supabase client not loaded', 'error');
   try {
@@ -134,6 +145,7 @@ async function loginWithGoogle() {
     toast(err.message || 'Google OAuth failed', 'error');
   }
 }
+
 async function logout() {
   Auth.clear();
   if (typeof sb !== 'undefined') {
@@ -141,6 +153,7 @@ async function logout() {
   }
   window.location.reload();
 }
+
 // ── Dashboard ─────────────────────────────────────────────────────────────
 async function loadGuardDashboard() {
   const [queueRes, alertRes] = await Promise.all([
@@ -149,15 +162,18 @@ async function loadGuardDashboard() {
   ]);
   const queue  = queueRes.ok  ? await queueRes.json()  : [];
   const alerts = alertRes.ok  ? await alertRes.json()  : [];
+
   document.getElementById('guard-stats').innerHTML = `
     <div class="stat-card" style="background:#1a2942"><div class="stat-val" style="color:#60a5fa">${queue.length}</div><div class="stat-lbl" style="color:#93b4d4">In Queue</div></div>
     <div class="stat-card" style="background:#1a2942"><div class="stat-val" style="color:var(--danger)">${alerts.length}</div><div class="stat-lbl" style="color:#93b4d4">Alerts</div></div>
   `;
+
   // Active SOS alerts
   document.getElementById('active-alerts').innerHTML = alerts.map(a => `
     <div class="alert-banner" onclick="acknowledgeAlert('${a.id}')">
       🚨 SOS — ${a.flats?.flat_number || 'Unknown flat'} · Tap to acknowledge
     </div>`).join('');
+
   // Visitor queue
   document.getElementById('visitor-queue').innerHTML = queue.length
     ? queue.map(v => `
@@ -169,9 +185,11 @@ async function loadGuardDashboard() {
         <button class="btn btn-success" style="padding:5px 12px;font-size:.8rem" onclick="logExitGuard('${v.id}')">Exit</button>
       </div>`).join('')
     : '<p style="color:#93b4d4;text-align:center;padding:12px">Queue is clear</p>';
+
   // Recent vehicle entries
   loadVehicleEntries();
 }
+
 // ── Realtime subscriptions ────────────────────────────────────────────────
 function subscribeAlerts() {
   sb.channel('guard-alerts')
@@ -183,6 +201,7 @@ function subscribeAlerts() {
     })
     .subscribe();
 }
+
 function subscribeVisitorQueue() {
   sb.channel('guard-queue')
     .on('postgres_changes', {
@@ -190,11 +209,13 @@ function subscribeVisitorQueue() {
     }, () => loadGuardDashboard())
     .subscribe();
 }
+
 // ── Alert acknowledge ─────────────────────────────────────────────────────
 async function acknowledgeAlert(id) {
   const res = await apiFetch(`/security-alerts/${id}/acknowledge`, { method: 'PATCH', body: '{}' });
   if (res.ok) { toast('Acknowledged — on my way!', 'success'); loadGuardDashboard(); }
 }
+
 // ── Visitor OTP verify ────────────────────────────────────────────────────
 async function verifyVisitorOtp() {
   const otp = document.getElementById('otp-scan-input').value.trim();
@@ -213,8 +234,10 @@ async function verifyVisitorOtp() {
     document.getElementById('otp-result').innerHTML = `<div class="card" style="background:#3a0d0d;border-color:var(--danger)">❌ ${data.error}</div>`;
   }
 }
+
 // ── Walk-in ───────────────────────────────────────────────────────────────
 let flatsCache = [];
+
 async function loadFlatsList() {
   if (flatsCache.length) return;
   const res = await apiFetch('/admin/flats');
@@ -237,6 +260,7 @@ async function loadFlatsList() {
     });
   }
 }
+
 async function logWalkin() {
   const body = {
     visitor_name: document.getElementById('walkin-name').value.trim(),
@@ -256,11 +280,13 @@ async function logWalkin() {
     toast(e.error || 'Failed', 'error');
   }
 }
+
 async function logExitGuard(logId) {
   await apiFetch(`/visitors/${logId}/exit`, { method: 'PATCH', body: '{}' });
   toast('Exit logged', 'success');
   loadGuardDashboard();
 }
+
 // ── Vehicle ───────────────────────────────────────────────────────────────
 async function lookupPlate() {
   const plate = document.getElementById('plate-input').value.trim().toUpperCase();
@@ -280,6 +306,7 @@ async function lookupPlate() {
     </div>`;
   }
 }
+
 async function logVehicleEntry() {
   const plate = document.getElementById('plate-input').value.trim().toUpperCase();
   if (!plate) return toast('Enter plate number', 'error');
@@ -291,11 +318,11 @@ async function logVehicleEntry() {
     loadVehicleEntries();
   } else toast('Failed to log entry', 'error');
 }
+
 async function logVehicleExitByPlate() {
   const plate = document.getElementById('exit-plate-input').value.trim().toUpperCase();
   if (!plate) return toast('Enter plate number', 'error');
   const el = document.getElementById('exit-result');
-  // Find the open entry for this plate (no exit_time)
   const res = await apiFetch(`/vehicles/entries`);
   if (!res.ok) return toast('Failed to fetch entries', 'error');
   const entries = await res.json();
@@ -312,6 +339,7 @@ async function logVehicleExitByPlate() {
     loadVehicleEntries();
   } else toast('Failed to log exit', 'error');
 }
+
 async function loadVehicleEntries() {
   const res = await apiFetch('/vehicles/entries');
   const data = res.ok ? await res.json() : [];
@@ -333,12 +361,13 @@ async function loadVehicleEntries() {
         </tbody>
       </table></div>`
     : '<p style="color:#93b4d4;text-align:center;padding:12px">No vehicles today</p>';
-  // Update both places (page + dashboard)
+
   const listEl = document.getElementById('vehicle-entries-list');
   if (listEl) listEl.innerHTML = html;
   const recentEl = document.getElementById('recent-entries');
   if (recentEl) recentEl.innerHTML = html;
 }
+
 // ── Delivery ──────────────────────────────────────────────────────────────
 async function loadDeliveryFlats() {
   await loadFlatsList();
@@ -351,7 +380,6 @@ async function loadDeliveryFlats() {
       delFlat.appendChild(o);
     });
   }
-  // Load platforms
   const pRes = await apiFetch('/delivery/platforms');
   if (pRes.ok) {
     const platforms = await pRes.json();
@@ -363,6 +391,7 @@ async function loadDeliveryFlats() {
     });
   }
 }
+
 async function logDelivery() {
   const body = {
     flat_id:       document.getElementById('del-flat').value,
@@ -379,6 +408,7 @@ async function logDelivery() {
     toast(msg, 'success');
   } else toast('Failed', 'error');
 }
+
 async function collectParcel() {
   const id  = document.getElementById('parcel-delivery-id').value.trim();
   const otp = document.getElementById('parcel-otp-input').value.trim();
@@ -387,8 +417,10 @@ async function collectParcel() {
   if (res.ok) toast('Parcel collected ✓', 'success');
   else { const e = await res.json(); toast(e.error || 'Failed', 'error'); }
 }
+
 // ── Domestic Help ─────────────────────────────────────────────────────────
 let currentHelper = null;
+
 async function lookupHelper() {
   const passcode = document.getElementById('helper-passcode').value.trim();
   if (!passcode || passcode.length !== 6) return toast('Enter 6-digit passcode', 'error');
@@ -412,6 +444,7 @@ async function lookupHelper() {
     document.getElementById('helper-entry-btn').style.display = 'none';
   }
 }
+
 async function logHelperEntry() {
   if (!currentHelper) return;
   const flatLinks = currentHelper.helper_flat_links || [];
@@ -428,6 +461,7 @@ async function logHelperEntry() {
     currentHelper = null;
   } else toast('Failed to log entry', 'error');
 }
+
 // ── Kids Checkout ─────────────────────────────────────────────────────────
 async function initiateKidsCheckout() {
   const flatId = document.getElementById('kids-flat').value;
@@ -440,7 +474,6 @@ async function initiateKidsCheckout() {
         ⏳ Waiting for parent approval (Event ID: ${data.id?.slice(0,8)}...)
       </div>`;
     toast('Request sent to parent', 'success');
-    // Subscribe to response
     sb.channel(`kids-${data.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'kids_checkout_events', filter: `id=eq.${data.id}` },
         payload => {
