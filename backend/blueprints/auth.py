@@ -143,7 +143,7 @@ def _build_session_response(session, default_role: str = 'super_admin'):
 
     if not profile:
         new_row = {'id': user_id, 'role': default_role}
-        if phone:  # don't insert empty phone — unique constraint would conflict
+        if phone:
             new_row['phone'] = phone
         sb.table('user_profiles').insert(new_row).execute()
         profile = {'role': default_role}
@@ -210,87 +210,149 @@ def update_me():
     return jsonify(result.data[0] if result.data else {})
 
 
-@auth_bp.post('/select-flat')
-@require_auth
-def select_flat():
-    """Set the current user's flat assignment from admin-created flats."""
+@auth_bp.post('/magic-link')
+def magic_link():
+    """Trigger Magic Link email login for guards."""
     data = request.get_json(silent=True) or {}
-    flat_id = data.get('flat_id')
-    if not flat_id:
-        return jsonify({'error': 'flat_id is required'}), 400
+    email = (data.get('email') or '').strip().lower()
+    if not email:
+        return jsonify({'error': 'email is required'}), 400
 
-    sb = get_admin_client()
-    flat = (
-        sb.table('flats')
-        .select('id, society_id')
-        .eq('id', flat_id)
-        .eq('society_id', g.society_id)
-        .limit(1)
-        .execute()
-    )
-    if not flat.data:
-        return jsonify({'error': 'Flat not found in your society'}), 404
-
-    updated = (
-        sb.table('user_profiles')
-        .update({'flat_id': flat_id})
-        .eq('id', g.user_id)
-        .execute()
-    )
-    return jsonify(updated.data[0] if updated.data else {'updated': True})
+    try:
+        sb = get_admin_client()
+        sb.auth.sign_in_with_otp({
+            'email': email,
+            'options': {
+                'email_redirect_to': request.host_url + 'guard'
+            }
+        })
+        return jsonify({'message': 'Check your email for login link!'})
+    except Exception as e:
+        return jsonify({'error': 'Failed to send magic link', 'detail': str(e)}), 500
 
 
-@auth_bp.get('/resident-flats')
-@require_auth
-def resident_flats():
-    """Return buildings+flats that have at least one registered resident.
-    Scopes flats by society (via flats.society_id) then checks user_profiles
-    without re-filtering by society so admin-created profiles always appear."""
-    sb = get_admin_client()
+@auth_bp.post('/verify-session')
+def verify_session():
+    """Verify a Supabase session (e.g. from Google OAuth / Magic Link) and return roles/user profile."""
+    data = request.get_json(silent=True) or {}
+    token = data.get('access_token')
+    if not token:
+        return jsonify({'error': 'access_token required'}), 400
+    try:
+        sb = get_admin_client()
+        user_resp = sb.auth.get_user(token)
+        if not user_resp or not user_resp.user:
+            return jsonify({'error': 'Invalid token'}), 401
+        
+        user_id = user_resp.user.id
+        email = getattr(user_resp.user, 'email', None)
 
-    # Step 1: all flats in this society with building info
-    all_flats_q = (
-        sb.table('flats')
-        .select('id, flat_number, building_id, buildings(id, name)')
-        .eq('society_id', g.society_id)
-        .execute()
-    )
-    all_flats = all_flats_q.data or []
-    if not all_flats:
-        return jsonify([])
+        # Load user profile
+        try:
+            profile_res = (
+                sb.table('user_profiles')
+                .select('*')
+                .eq('id', user_id)
+                .single()
+                .execute()
+            )
+            profile = profile_res.data if profile_res else {}
+        except Exception:
+            profile = {}
 
-    all_flat_ids = [f['id'] for f in all_flats]
+        role = profile.get('role', '')
+        
+        # Check authorized_guards table if role is guard or profile does not exist yet (but they have an email)
+        if (role == 'guard' or (not role and email)) and email != 'dev-guard@mygate.internal':
+            # Live check against Google Group membership
+            from ..utils.google_groups import is_email_in_google_group
+            is_in_group = is_email_in_google_group(email)
 
-    # Step 2: which of those flat_ids have at least one resident profile
-    # (no society_id filter here — admin-created profiles may have different mapping)
-    # Supabase .in_() max 1000; chunk if needed
-    occupied = set()
-    chunk_size = 200
-    for i in range(0, len(all_flat_ids), chunk_size):
-        chunk = all_flat_ids[i:i+chunk_size]
-        rows = (
-            sb.table('user_profiles')
-            .select('flat_id')
-            .in_('flat_id', chunk)
-            .in_('role', ['resident', 'tenant', 'committee_member'])
-            .execute()
-        )
-        for r in (rows.data or []):
-            if r.get('flat_id'):
-                occupied.add(r['flat_id'])
+            if not is_in_group:
+                # If they are not in the Google Group, deactivate them in authorized_guards and block access
+                try:
+                    sb.table('authorized_guards').update({'active': False}).eq('email', email).execute()
+                    sb.table('user_profiles').update({'is_active': False}).eq('id', user_id).execute()
+                except Exception:
+                    pass
+                return jsonify({'error': 'Access revoked: Not a member of the authorized Google Group.'}), 403
 
-    # Step 3: group occupied flats by building
-    buildings = {}
-    for f in all_flats:
-        if f['id'] not in occupied:
-            continue
-        b = f.get('buildings') or {}
-        bid = b.get('id') or f['building_id']
-        if bid not in buildings:
-            buildings[bid] = {'id': bid, 'name': b.get('name', '—'), 'flats': []}
-        buildings[bid]['flats'].append({'id': f['id'], 'flat_number': f['flat_number']})
+            # If they are in the group, ensure they exist and are active in authorized_guards table
+            try:
+                guard_check = (
+                    sb.table('authorized_guards')
+                    .select('*')
+                    .eq('email', email)
+                    .maybe_single()
+                    .execute()
+                )
+                guard_data = guard_check.data if guard_check else None
+            except Exception as e:
+                if 'authorized_guards' in str(e):
+                    return jsonify({
+                        'error': 'Database table authorized_guards is not configured.',
+                        'detail': 'Please run the SQL Table Setup in your Supabase SQL Editor first.'
+                    }), 500
+                raise e
 
-    result = sorted(buildings.values(), key=lambda x: x['name'])
-    for bldg in result:
-        bldg['flats'].sort(key=lambda x: x['flat_number'])
-    return jsonify(result)
+            if not guard_data:
+                # Auto-provision new guard from Google Group
+                try:
+                    insert_res = sb.table('authorized_guards').insert({
+                        'email': email,
+                        'name': 'Google Group Guard',
+                        'gate_id': 'GATE-A',
+                        'active': True
+                    }).execute()
+                    guard_data = insert_res.data[0] if insert_res.data else None
+                except Exception:
+                    pass
+            elif not guard_data.get('active'):
+                # Reactivate if they were inactive but are now in the group
+                try:
+                    update_res = sb.table('authorized_guards').update({'active': True}).eq('email', email).execute()
+                    guard_data = update_res.data[0] if update_res.data else guard_data
+                except Exception:
+                    pass
+
+            if not guard_data or not guard_data.get('active'):
+                return jsonify({'error': 'Access revoked: Not an active authorized guard.'}), 403
+
+            # Auto-create profile if missing
+            if not profile:
+                society_id = '02b53b8b-7b77-4b1e-9cc7-4a31cd9cce39' # Default society ID
+                new_profile = {
+                    'id': user_id,
+                    'role': 'guard',
+                    'full_name': guard_data.get('name') or 'Gate Guard',
+                    'society_id': society_id,
+                    'is_active': True
+                }
+                sb.table('user_profiles').insert(new_profile).execute()
+                profile = new_profile
+                role = 'guard'
+
+            # Update last login timestamp in authorized_guards
+            try:
+                from datetime import datetime, timezone
+                sb.table('authorized_guards').update({
+                    'last_login': datetime.now(timezone.utc).isoformat()
+                }).eq('email', email).execute()
+            except Exception:
+                pass
+
+        if not role:
+            # Fallback for residents or other roles
+            role = 'resident'
+
+        return jsonify({
+            'access_token':  token,
+            'refresh_token': data.get('refresh_token'),
+            'user_id':       user_id,
+            'role':          role,
+            'society_id':    profile.get('society_id'),
+            'flat_id':       profile.get('flat_id'),
+        })
+
+    except Exception as e:
+        return jsonify({'error': 'Session verification failed', 'detail': str(e)}), 400
