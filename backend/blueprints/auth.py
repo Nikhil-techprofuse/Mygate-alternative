@@ -1,6 +1,3 @@
-import os
-import re
-import psycopg2
 from flask import Blueprint, request, jsonify, g, current_app
 from ..supabase_client import get_admin_client
 from ..utils.auth_middleware import require_auth
@@ -126,105 +123,68 @@ def _dev_login(phone: str):
     return _build_session_response(session, default_role=dev_role)
 
 
+def _dev_email_login(email: str):
+    """
+    Dev-only bypass for email login: ensures the test account exists,
+    signs in, and builds the response.
+    """
+    sb = get_admin_client()
+    try:
+        sb.auth.admin.create_user({
+            'email':         email,
+            'password':      _DEV_BYPASS_PWD,
+            'email_confirm': True,
+        })
+    except Exception:
+        try:
+            all_users = sb.auth.admin.list_users()
+            user_list = all_users if isinstance(all_users, list) else getattr(all_users, 'users', [])
+            existing  = next((u for u in user_list if getattr(u, 'email', '') == email), None)
+            if existing:
+                sb.auth.admin.update_user_by_id(existing.id, {
+                    'password':      _DEV_BYPASS_PWD,
+                    'email_confirm': True,
+                })
+        except Exception:
+            pass
+
+    try:
+        session = sb.auth.sign_in_with_password({
+            'email':    email,
+            'password': _DEV_BYPASS_PWD,
+        })
+    except Exception as e:
+        return jsonify({'error': 'Dev login failed — sign in error', 'detail': str(e)}), 500
+
+    if not session or not session.session:
+        return jsonify({'error': 'Dev login failed — no session returned'}), 500
+
+    return _build_session_response(session, default_role='guard')
+
+
+
 def _build_session_response(session, default_role: str = 'super_admin'):
     """Upsert user profile and return JWT payload."""
     sb      = get_admin_client()
     user_id = session.user.id
     phone   = getattr(session.user, 'phone', None)
+    email   = getattr(session.user, 'email', None)
 
-    # ── Migrate admin-created profile if it exists ────────────────────────────
-    if phone:
-        try:
-            # Check if there is an existing profile with same phone but different id
-            dummy_q = (
-                sb.table('user_profiles')
-                .select('id, role, society_id, flat_id, full_name')
-                .eq('phone', phone)
-                .neq('id', user_id)
-                .maybe_single()
-                .execute()
-            )
-            dummy_profile = dummy_q.data if dummy_q else None
-            if dummy_profile:
-                dummy_id = dummy_profile['id']
-                db_pwd = os.getenv('SUPABASE_DB_PASSWORD') or 'Lq5RnKwYdmZJrE2'
-                supabase_url = os.getenv('SUPABASE_URL', 'https://olkudsuwbggebcdqpwfg.supabase.co')
-                match = re.search(r"https?://([^.]+)\.supabase\.co", supabase_url)
-                db_host = f"db.{match.group(1)}.supabase.co" if match else 'db.olkudsuwbggebcdqpwfg.supabase.co'
-                
-                conn = psycopg2.connect(
-                    host=db_host,
-                    port=5432,
-                    dbname='postgres',
-                    user='postgres',
-                    password=db_pwd,
-                    sslmode='require',
-                    connect_timeout=15,
-                )
-                try:
-                    cur = conn.cursor()
-                    # Delete any user_profile already created for user_id to prevent primary key conflict
-                    cur.execute("DELETE FROM user_profiles WHERE id = %s", (user_id,))
-                    
-                    # Update all referencing tables
-                    cur.execute("UPDATE guard_gate_assignments SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE gate_patrol_logs SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE gate_chat_messages SET sender_id = %s WHERE sender_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE visitor_logs SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE visitor_otps SET created_by = %s WHERE created_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE vehicles SET owner_id = %s WHERE owner_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE vehicle_entry_logs SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE vehicle_disputes SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE deliveries SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE helper_flat_links SET resident_id = %s WHERE resident_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE helper_attendance SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE helper_ratings SET resident_id = %s WHERE resident_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE kids_checkout_events SET guard_id = %s WHERE guard_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE emergency_contacts SET resident_id = %s WHERE resident_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE security_alerts SET triggered_by = %s WHERE triggered_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE security_alerts SET guard_acknowledged_by = %s WHERE guard_acknowledged_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE admin_broadcasts SET sent_by = %s WHERE sent_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE notices SET posted_by = %s WHERE posted_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE notice_acknowledgments SET resident_id = %s WHERE resident_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE polls SET created_by = %s WHERE created_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE poll_votes SET voter_id = %s WHERE voter_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE events SET created_by = %s WHERE created_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE event_rsvp SET resident_id = %s WHERE resident_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE forum_threads SET created_by = %s WHERE created_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE forum_replies SET posted_by = %s WHERE posted_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE society_documents SET uploaded_by = %s WHERE uploaded_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE personal_documents SET uploaded_by = %s WHERE uploaded_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE payments SET paid_by = %s WHERE paid_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE expenses SET recorded_by = %s WHERE recorded_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE helpdesk_tickets SET raised_by = %s WHERE raised_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE helpdesk_tickets SET assigned_to = %s WHERE assigned_to = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE ticket_updates SET updated_by = %s WHERE updated_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE ticket_attachments SET uploaded_by = %s WHERE uploaded_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE bookings SET booked_by = %s WHERE booked_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE staff_profiles SET user_id = %s WHERE user_id = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE staff_attendance SET marked_by = %s WHERE marked_by = %s", (user_id, dummy_id))
-                    cur.execute("UPDATE leave_requests SET reviewed_by = %s WHERE reviewed_by = %s", (user_id, dummy_id))
-                    
-                    # Update user_profiles.id
-                    cur.execute("UPDATE user_profiles SET id = %s WHERE id = %s", (user_id, dummy_id))
-                    
-                    # Clean up dummy user in auth.users
-                    cur.execute("DELETE FROM auth.users WHERE id = %s", (dummy_id,))
-                    
-                    conn.commit()
-                    cur.close()
-                except Exception as e:
-                    conn.rollback()
-                    current_app.logger.error(f"Migration transaction failed: {e}")
-                finally:
-                    conn.close()
-        except Exception as e:
-            current_app.logger.error(f"Failed to migrate profile: {e}")
+    # Dev bypass check
+    dev_bypass = False
+    try:
+        from flask import current_app
+        cfg = current_app.config
+        dev_phones = [cfg.get('DEV_ADMIN_PHONE'), cfg.get('DEV_GUARD_PHONE'), cfg.get('DEV_RESIDENT_PHONE')]
+        if phone in dev_phones or (email and email.endswith('@mygate.internal')):
+            dev_bypass = True
+    except Exception:
+        pass
 
     try:
         existing = (
             sb.table('user_profiles')
-            .select('id, role, society_id, flat_id, full_name')
+            .select('id, role, society_id, flat_id, full_name, phone, email')
             .eq('id', user_id)
             .maybe_single()
             .execute()
@@ -234,11 +194,72 @@ def _build_session_response(session, default_role: str = 'super_admin'):
         profile = {}
 
     if not profile:
-        new_row = {'id': user_id, 'role': default_role}
-        if phone:  # don't insert empty phone — unique constraint would conflict
-            new_row['phone'] = phone
-        sb.table('user_profiles').insert(new_row).execute()
-        profile = {'role': default_role}
+        # Check if there's a pre-registered resident with this phone number
+        profile_to_link = None
+        if phone:
+            try:
+                res = sb.table('user_profiles').select('*').eq('phone', phone).maybe_single().execute()
+                if res and res.data:
+                    profile_to_link = res.data
+            except Exception:
+                pass
+        
+        # If not found by phone, try email (for Google OAuth / email OTP)
+        if not profile_to_link and email:
+            try:
+                res = sb.table('user_profiles').select('*').eq('email', email.lower().strip()).maybe_single().execute()
+                if res and res.data:
+                    profile_to_link = res.data
+            except Exception:
+                pass
+
+        if profile_to_link:
+            try:
+                # Link the pre-registered profile to this logged-in auth user
+                sb.table('user_profiles').update({'id': user_id}).eq('id', profile_to_link['id']).execute()
+                profile = profile_to_link
+                profile['id'] = user_id
+            except Exception as e:
+                # Fallback to copy fields if primary key update is blocked
+                try:
+                    sb.table('user_profiles').insert({
+                        'id': user_id,
+                        'role': profile_to_link.get('role', default_role),
+                        'society_id': profile_to_link.get('society_id'),
+                        'flat_id': profile_to_link.get('flat_id'),
+                        'full_name': profile_to_link.get('full_name'),
+                        'phone': phone,
+                        'email': email
+                    }).execute()
+                    profile = {
+                        'id': user_id,
+                        'role': profile_to_link.get('role', default_role),
+                        'society_id': profile_to_link.get('society_id'),
+                        'flat_id': profile_to_link.get('flat_id'),
+                        'full_name': profile_to_link.get('full_name'),
+                        'phone': phone,
+                        'email': email
+                    }
+                except Exception:
+                    pass
+        elif dev_bypass or default_role in ('super_admin', 'guard'):
+            # Create a profile for dev accounts, admins, or guards
+            society_id = '02b53b8b-7b77-4b1e-9cc7-4a31cd9cce39' # Default society ID
+            new_row = {'id': user_id, 'role': default_role, 'society_id': society_id}
+            if phone:
+                new_row['phone'] = phone
+            sb.table('user_profiles').insert(new_row).execute()
+            profile = {'role': default_role, 'society_id': society_id}
+        else:
+            # Block login
+            return jsonify({
+                'error': 'Access denied: You are not registered as a resident in this society. Please contact the administrator.'
+            }), 403
+
+    elif not profile.get('society_id'):
+        society_id = '02b53b8b-7b77-4b1e-9cc7-4a31cd9cce39' # Default society ID
+        sb.table('user_profiles').update({'society_id': society_id}).eq('id', user_id).execute()
+        profile['society_id'] = society_id
 
     return jsonify({
         'access_token':  session.session.access_token,
@@ -281,28 +302,32 @@ def me():
         .execute()
     )
     data = profile.data if profile.data else g.profile
-    if data:
-        full_name = data.get('full_name')
-        flat_id = data.get('flat_id')
-        if (not full_name or full_name == 'Resident User') and flat_id:
+    if data and data.get('role') == 'guard':
+        email = data.get('email')
+        if not email:
+            auth_header = request.headers.get('Authorization', '')
+            parts = auth_header.split(' ', 1)
+            if len(parts) > 1:
+                try:
+                    user_resp = sb.auth.get_user(parts[1])
+                    email = getattr(user_resp.user, 'email', None) if user_resp and user_resp.user else None
+                except Exception:
+                    pass
+        
+        gate_id = 'GATE-A'
+        if email:
             try:
-                # Query user_profiles for any resident or tenant profile assigned to the same flat_id
-                real_residents = (
-                    sb.table('user_profiles')
-                    .select('full_name')
-                    .eq('flat_id', flat_id)
-                    .neq('id', g.user_id)
-                    .in_('role', ['resident', 'tenant', 'committee_member'])
-                    .execute()
-                )
-                if real_residents and real_residents.data:
-                    for r in real_residents.data:
-                        name = (r.get('full_name') or '').strip()
-                        if name and name != 'Resident User':
-                            data['full_name'] = name
-                            break
-            except Exception as e:
-                current_app.logger.error(f"Error querying real resident name for bypass: {e}")
+                guard_check = sb.table('authorized_guards').select('gate_id').eq('email', email).maybe_single().execute()
+                if guard_check and guard_check.data:
+                    gate_id = guard_check.data.get('gate_id') or 'GATE-A'
+            except Exception:
+                pass
+        
+        data = dict(data)
+        data['gate_id'] = gate_id
+        if email:
+            data['email'] = email
+            
     return jsonify(data)
 
 
@@ -325,87 +350,341 @@ def update_me():
     return jsonify(result.data[0] if result.data else {})
 
 
-@auth_bp.post('/select-flat')
-@require_auth
-def select_flat():
-    """Set the current user's flat assignment from admin-created flats."""
+@auth_bp.post('/magic-link')
+def magic_link():
+    """Trigger Email OTP login for guards."""
     data = request.get_json(silent=True) or {}
-    flat_id = data.get('flat_id')
-    if not flat_id:
-        return jsonify({'error': 'flat_id is required'}), 400
+    email = (data.get('email') or '').strip().lower()
+    if not email:
+        return jsonify({'error': 'email is required'}), 400
 
-    sb = get_admin_client()
-    flat = (
-        sb.table('flats')
-        .select('id, society_id')
-        .eq('id', flat_id)
-        .eq('society_id', g.society_id)
-        .limit(1)
-        .execute()
-    )
-    if not flat.data:
-        return jsonify({'error': 'Flat not found in your society'}), 404
+    # Dev bypass for sending
+    if email == 'guard1@gmail.com':
+        return jsonify({'message': 'Check your email for the OTP code! (Dev bypass active: use code 111111)'})
 
-    updated = (
-        sb.table('user_profiles')
-        .update({'flat_id': flat_id})
-        .eq('id', g.user_id)
-        .execute()
-    )
-    return jsonify(updated.data[0] if updated.data else {'updated': True})
+    try:
+        sb = get_admin_client()
+        sb.auth.sign_in_with_otp({
+            'email': email,
+            'options': {
+                'email_redirect_to': request.host_url + 'guard'
+            }
+        })
+        return jsonify({'message': 'Check your email for the OTP code!'})
+    except Exception as e:
+        return jsonify({'error': 'Failed to send email OTP', 'detail': str(e)}), 500
+
+
+@auth_bp.post('/verify-email-otp')
+def verify_email_otp():
+    """Verify email OTP token and return session payload if Google Group authorized."""
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    token = (data.get('token') or '').strip()
+    if not email or not token:
+        return jsonify({'error': 'email and token are required'}), 400
+
+    # Dev bypass for testing without actual email
+    if email == 'guard1@gmail.com' and token == '111111':
+        return _dev_email_login(email)
+
+    try:
+        sb = get_admin_client()
+        # Verify email OTP (Supabase supports 'email' or 'magiclink' as type depending on config)
+        try:
+            session = sb.auth.verify_otp({'email': email, 'token': token, 'type': 'email'})
+        except Exception:
+            session = sb.auth.verify_otp({'email': email, 'token': token, 'type': 'magiclink'})
+
+        if not session or not session.session:
+            return jsonify({'error': 'Invalid or expired OTP'}), 401
+
+        user_id = session.user.id
+        
+        # Check Google Group membership
+        from ..utils.google_groups import is_email_in_google_group
+        is_in_group = is_email_in_google_group(email)
+
+        if not is_in_group:
+            # Deactivate access
+            try:
+                sb.table('authorized_guards').update({'active': False}).eq('email', email).execute()
+                sb.table('user_profiles').update({'is_active': False}).eq('id', user_id).execute()
+            except Exception:
+                pass
+            return jsonify({'error': 'Access revoked: Not a member of the authorized Google Group.'}), 403
+
+        # Ensure they are active in authorized_guards table
+        try:
+            guard_check = sb.table('authorized_guards').select('*').eq('email', email).maybe_single().execute()
+            guard_data = guard_check.data if guard_check else None
+        except Exception:
+            guard_data = None
+
+        if not guard_data:
+            # Auto-provision new guard from Google Group
+            try:
+                insert_res = sb.table('authorized_guards').insert({
+                    'email': email,
+                    'name': 'Google Group Guard',
+                    'gate_id': 'GATE-A',
+                    'active': True
+                }).execute()
+                guard_data = insert_res.data[0] if insert_res.data else None
+            except Exception:
+                pass
+        elif not guard_data.get('active'):
+            # Reactivate
+            try:
+                update_res = sb.table('authorized_guards').update({'active': True}).eq('email', email).execute()
+                guard_data = update_res.data[0] if update_res.data else guard_data
+            except Exception:
+                pass
+
+        if not guard_data or not guard_data.get('active'):
+            return jsonify({'error': 'Access revoked: Not an active authorized guard.'}), 403
+
+        # Update last login timestamp
+        try:
+            from datetime import datetime, timezone
+            sb.table('authorized_guards').update({
+                'last_login': datetime.now(timezone.utc).isoformat()
+            }).eq('email', email).execute()
+        except Exception:
+            pass
+
+        return _build_session_response(session, default_role='guard')
+
+    except Exception as e:
+        return jsonify({'error': 'OTP verification failed', 'detail': str(e)}), 500
+
+
+
+@auth_bp.post('/verify-session')
+def verify_session():
+    """Verify a Supabase session (e.g. from Google OAuth / Magic Link) and return roles/user profile."""
+    data = request.get_json(silent=True) or {}
+    token = data.get('access_token')
+    if not token:
+        return jsonify({'error': 'access_token required'}), 400
+    try:
+        sb = get_admin_client()
+        user_resp = sb.auth.get_user(token)
+        if not user_resp or not user_resp.user:
+            return jsonify({'error': 'Invalid token'}), 401
+        
+        user_id = user_resp.user.id
+        email = getattr(user_resp.user, 'email', None)
+
+        # Load user profile
+        try:
+            profile_res = (
+                sb.table('user_profiles')
+                .select('*')
+                .eq('id', user_id)
+                .single()
+                .execute()
+            )
+            profile = profile_res.data if profile_res else {}
+        except Exception:
+            profile = {}
+
+        role = profile.get('role', '')
+        
+        # Check authorized_guards table if role is guard or profile does not exist yet (but they have an email)
+        if (role == 'guard' or (not role and email)) and email != 'dev-guard@mygate.internal':
+            # Live check against Google Group membership
+            from ..utils.google_groups import is_email_in_google_group
+            is_in_group = is_email_in_google_group(email)
+
+            if not is_in_group:
+                # If they are not in the Google Group, deactivate them in authorized_guards and block access
+                try:
+                    sb.table('authorized_guards').update({'active': False}).eq('email', email).execute()
+                    sb.table('user_profiles').update({'is_active': False}).eq('id', user_id).execute()
+                except Exception:
+                    pass
+                return jsonify({'error': 'Access revoked: Not a member of the authorized Google Group.'}), 403
+
+            # If they are in the group, ensure they exist and are active in authorized_guards table
+            try:
+                guard_check = (
+                    sb.table('authorized_guards')
+                    .select('*')
+                    .eq('email', email)
+                    .maybe_single()
+                    .execute()
+                )
+                guard_data = guard_check.data if guard_check else None
+            except Exception as e:
+                if 'authorized_guards' in str(e):
+                    return jsonify({
+                        'error': 'Database table authorized_guards is not configured.',
+                        'detail': 'Please run the SQL Table Setup in your Supabase SQL Editor first.'
+                    }), 500
+                raise e
+
+            if not guard_data:
+                # Auto-provision new guard from Google Group
+                try:
+                    insert_res = sb.table('authorized_guards').insert({
+                        'email': email,
+                        'name': 'Google Group Guard',
+                        'gate_id': 'GATE-A',
+                        'active': True
+                    }).execute()
+                    guard_data = insert_res.data[0] if insert_res.data else None
+                except Exception:
+                    pass
+            elif not guard_data.get('active'):
+                # Reactivate if they were inactive but are now in the group
+                try:
+                    update_res = sb.table('authorized_guards').update({'active': True}).eq('email', email).execute()
+                    guard_data = update_res.data[0] if update_res.data else guard_data
+                except Exception:
+                    pass
+
+            if not guard_data or not guard_data.get('active'):
+                return jsonify({'error': 'Access revoked: Not an active authorized guard.'}), 403
+
+            # Auto-create profile if missing
+            if not profile:
+                society_id = '02b53b8b-7b77-4b1e-9cc7-4a31cd9cce39' # Default society ID
+                new_profile = {
+                    'id': user_id,
+                    'role': 'guard',
+                    'full_name': guard_data.get('name') or 'Gate Guard',
+                    'society_id': society_id,
+                    'is_active': True
+                }
+                sb.table('user_profiles').insert(new_profile).execute()
+                profile = new_profile
+                role = 'guard'
+
+            # Update last login timestamp in authorized_guards
+            try:
+                from datetime import datetime, timezone
+                sb.table('authorized_guards').update({
+                    'last_login': datetime.now(timezone.utc).isoformat()
+                }).eq('email', email).execute()
+            except Exception:
+                pass
+
+        if not role:
+            # Fallback for residents or other roles
+            role = 'resident'
+
+        return jsonify({
+            'access_token':  token,
+            'refresh_token': data.get('refresh_token'),
+            'user_id':       user_id,
+            'role':          role,
+            'society_id':    profile.get('society_id'),
+            'flat_id':       profile.get('flat_id'),
+        })
+
+    except Exception as e:
+        return jsonify({'error': 'Session verification failed', 'detail': str(e)}), 400
 
 
 @auth_bp.get('/resident-flats')
 @require_auth
-def resident_flats():
-    """Return buildings+flats that have at least one registered resident.
-    Scopes flats by society (via flats.society_id) then checks user_profiles
-    without re-filtering by society so admin-created profiles always appear."""
+def get_resident_flats():
     sb = get_admin_client()
+    try:
+        # Fetch buildings in the society
+        b_res = sb.table('buildings').select('id, name').eq('society_id', g.society_id).execute()
+        buildings = b_res.data if b_res else []
+        if not buildings:
+            return jsonify([])
 
-    # Step 1: all flats in this society with building info
-    all_flats_q = (
-        sb.table('flats')
-        .select('id, flat_number, building_id, buildings(id, name)')
-        .eq('society_id', g.society_id)
-        .execute()
-    )
-    all_flats = all_flats_q.data or []
-    if not all_flats:
-        return jsonify([])
+        # Find all flat IDs that are referenced by active user_profiles in this society
+        try:
+            up_res = (
+                sb.table('user_profiles')
+                .select('flat_id')
+                .not_.is_('flat_id', 'null')
+                .eq('is_active', True)
+                .eq('society_id', g.society_id)
+                .execute()
+            )
+            profile_rows = up_res.data if up_res else []
+            flat_ids = list({r['flat_id'] for r in profile_rows if r.get('flat_id')})
+        except Exception:
+            flat_ids = []
 
-    all_flat_ids = [f['id'] for f in all_flats]
+        if not flat_ids:
+            # No occupied flats — return empty list per-building
+            return jsonify([{'id': b['id'], 'name': b['name'], 'flats': []} for b in buildings])
 
-    # Step 2: which of those flat_ids have at least one resident profile
-    # (no society_id filter here — admin-created profiles may have different mapping)
-    # Supabase .in_() max 1000; chunk if needed
-    occupied = set()
-    chunk_size = 200
-    for i in range(0, len(all_flat_ids), chunk_size):
-        chunk = all_flat_ids[i:i+chunk_size]
-        rows = (
+        # Fetch only flats that are occupied
+        f_res = sb.table('flats').select('id, flat_number, building_id').in_('id', flat_ids).execute()
+        flats = f_res.data if f_res else []
+
+        flats_by_b = {}
+        for f in flats:
+            bid = f['building_id']
+            flats_by_b.setdefault(bid, []).append({'id': f['id'], 'flat_number': f['flat_number']})
+
+        result = []
+        for b in buildings:
+            result.append({'id': b['id'], 'name': b['name'], 'flats': flats_by_b.get(b['id'], [])})
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@auth_bp.get('/flat-resident')
+@require_auth
+def get_flat_resident():
+    """Return the primary resident name for the user's selected flat."""
+    sb = get_admin_client()
+    flat_id = g.flat_id
+    if not flat_id or flat_id == '00000000-0000-0000-0000-000000000000':
+        return jsonify({'resident_name': None})
+    try:
+        resident = (
             sb.table('user_profiles')
-            .select('flat_id')
-            .in_('flat_id', chunk)
+            .select('full_name')
+            .eq('flat_id', flat_id)
+            .eq('society_id', g.society_id)
             .in_('role', ['resident', 'tenant', 'committee_member'])
+            .eq('is_active', True)
+            .neq('id', g.user_id)
+            .order('created_at', desc=False)
+            .limit(1)
             .execute()
         )
-        for r in (rows.data or []):
-            if r.get('flat_id'):
-                occupied.add(r['flat_id'])
+        name = resident.data[0]['full_name'] if resident.data else None
+        return jsonify({'resident_name': name})
+    except Exception:
+        return jsonify({'resident_name': None})
 
-    # Step 3: group occupied flats by building
-    buildings = {}
-    for f in all_flats:
-        if f['id'] not in occupied:
-            continue
-        b = f.get('buildings') or {}
-        bid = b.get('id') or f['building_id']
-        if bid not in buildings:
-            buildings[bid] = {'id': bid, 'name': b.get('name', '—'), 'flats': []}
-        buildings[bid]['flats'].append({'id': f['id'], 'flat_number': f['flat_number']})
 
-    result = sorted(buildings.values(), key=lambda x: x['name'])
-    for bldg in result:
-        bldg['flats'].sort(key=lambda x: x['flat_number'])
-    return jsonify(result)
+@auth_bp.post('/select-flat')
+@require_auth
+def select_flat():
+    data = request.get_json(silent=True) or {}
+    flat_id = data.get('flat_id')
+    if not flat_id:
+        return jsonify({'error': 'flat_id is required'}), 400
+    
+    sb = get_admin_client()
+    try:
+        # Verify the flat exists and fetch its society_id
+        flat_check = sb.table('flats').select('id, society_id').eq('id', flat_id).maybe_single().execute()
+        if not flat_check.data:
+            return jsonify({'error': 'Flat not found'}), 404
+        
+        society_id = flat_check.data['society_id']
+        
+        # Update user's profile with selected flat and its society
+        sb.table('user_profiles').update({
+            'flat_id': flat_id,
+            'society_id': society_id
+        }).eq('id', g.user_id).execute()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

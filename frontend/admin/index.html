@@ -9,7 +9,8 @@
 <script src="/frontend/shared/theme.js"></script>
 <link rel="stylesheet" href="/frontend/shared/style.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
@@ -32,7 +33,7 @@
     <div id="step-otp" style="display:none">
       <p style="margin-bottom:16px;color:var(--muted);font-size:.9rem">OTP sent to <strong id="otp-phone-display"></strong></p>
       <div class="form-group"><label>OTP</label>
-        <input id="inp-otp" class="form-control" type="text" placeholder="000000" maxlength="6" pattern="[0-9]*" inputmode="numeric">
+        <input id="inp-otp" class="form-control" type="number" placeholder="000000" maxlength="6">
       </div>
       <button class="btn btn-primary btn-full btn-lg" onclick="verifyOtp()">Login</button>
     </div>
@@ -84,7 +85,6 @@
       <!-- Society Setup -->
       <div id="page-society" class="page">
         <h2 class="page-title">Society Setup</h2>
-        <!-- Step 1: create society (shown only when no society linked) -->
         <div id="create-society-card" class="card" style="display:none;margin-bottom:20px;max-width:560px">
           <div class="card-header">Create Your Society</div>
           <div class="form-group"><input id="soc-name"    class="form-control" type="text" placeholder="Society name *"></div>
@@ -97,7 +97,6 @@
           <button class="btn btn-primary btn-full" style="margin-top:12px" onclick="createSociety()">Create Society</button>
         </div>
         <div id="society-setup-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-          <!-- Buildings -->
           <div class="card">
             <div class="card-header">Buildings</div>
             <div id="buildings-list" style="margin-bottom:16px"></div>
@@ -108,17 +107,16 @@
               </div>
               <div class="form-group" style="margin-bottom:8px">
                 <label>No. of Floors</label>
-                <input id="new-building-floors" class="form-control" type="text" placeholder="e.g. 10" value="1" pattern="[0-9]*" inputmode="numeric">
+                <input id="new-building-floors" class="form-control" type="number" min="1" max="100" placeholder="e.g. 10" value="1">
               </div>
               <div class="form-group" style="margin-bottom:8px">
                 <label>Flats per Floor</label>
-                <input id="new-building-fpf" class="form-control" type="text" placeholder="e.g. 4" value="0" pattern="[0-9]*" inputmode="numeric">
+                <input id="new-building-fpf" class="form-control" type="number" min="0" max="50" placeholder="e.g. 4" value="0">
               </div>
             </div>
             <p id="building-flat-preview" style="font-size:.8rem;color:var(--muted);margin-bottom:10px"></p>
             <button class="btn btn-primary btn-full" onclick="addBuilding()">+ Add Building</button>
           </div>
-          <!-- Gates -->
           <div class="card">
             <div class="card-header">Gates</div>
             <div id="gates-list" style="margin-bottom:12px"></div>
@@ -195,6 +193,86 @@
             <tbody id="staff-table"></tbody>
           </table></div>
         </div>
+
+        <!-- Google Group Integration -->
+        <div class="card" style="margin-top:24px;margin-bottom:24px">
+          <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+            <span>⚙️ Google Group Integration Settings</span>
+            <span id="sync-status-badge" class="badge badge-info">Mock Mode</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:10px">
+            <div>
+              <div class="form-group" style="margin-bottom:12px">
+                <label style="font-weight:600;font-size:0.85rem">Google Group Email</label>
+                <input id="gg-email" class="form-control" type="email" placeholder="security-block-a@yoursociety.com" style="margin-top:4px">
+              </div>
+              <div class="form-group" style="margin-bottom:12px">
+                <label style="font-weight:600;font-size:0.85rem">Integration Mode</label>
+                <select id="gg-mode" class="form-control" onchange="toggleGoogleGroupModeUI()" style="margin-top:4px">
+                  <option value="mock">🧪 Mock / Simulation (For Local Testing)</option>
+                  <option value="real">🔌 Real Google Workspace Directory API</option>
+                </select>
+              </div>
+              <div id="real-service-account-section" class="form-group" style="display:none;margin-bottom:12px">
+                <label style="font-weight:600;font-size:0.85rem">Service Account JSON Credentials</label>
+                <textarea id="gg-sa-json" class="form-control" rows="4" placeholder='{"type": "service_account", ...}' style="font-family:monospace;font-size:0.8rem;margin-top:4px"></textarea>
+                <small style="color:var(--muted);font-size:0.75rem;margin-top:4px;display:inline-block">Required permissions: Directory API group member read scope.</small>
+              </div>
+              <div style="display:flex;gap:10px;margin-top:16px">
+                <button class="btn btn-primary" style="flex:1" onclick="saveGoogleGroupSettings()">Save Configuration</button>
+                <button class="btn btn-success" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px" onclick="syncGoogleGroupNow()">
+                  🔄 Sync Now
+                </button>
+              </div>
+            </div>
+            
+            <div id="mock-members-card" style="border-left:1px solid var(--border);padding-left:20px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <strong style="font-size:0.9rem">🧪 Mock Google Group Members</strong>
+                <button class="btn btn-primary" style="padding:2px 8px;font-size:0.75rem" onclick="openModal('modal-add-mock-member')">+ Add Member</button>
+              </div>
+              <div class="table-wrap" style="max-height:220px;overflow-y:auto">
+                <table style="width:100%;font-size:0.85rem">
+                  <thead>
+                    <tr>
+                      <th style="text-align:left;padding:6px;color:var(--muted)">Email</th>
+                      <th style="text-align:left;padding:6px;color:var(--muted)">Name</th>
+                      <th style="text-align:left;padding:6px;color:var(--muted)">Gate</th>
+                      <th style="padding:6px"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="mock-members-table"></tbody>
+                </table>
+              </div>
+            </div>
+            
+            <div id="real-api-info-card" style="border-left:1px solid var(--border);padding-left:20px;display:none;color:var(--muted);font-size:0.85rem">
+              <h4 style="margin:0 0 10px 0;color:var(--text)">Google Workspace Directory API Flow</h4>
+              <p style="margin-bottom:8px">In <strong>Real API Mode</strong>, the system dynamically checks the specified Google Group membership when a guard logs in via Google OAuth.</p>
+              <p style="margin-bottom:8px">An automated background sync job runs every <strong>1 minute</strong> to fetch all members from the group, auto-provision newly added guards, and deactivate guards removed from the group, terminating their active sessions instantly.</p>
+              <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:12px">
+                🔑 <strong>Setup instructions:</strong>
+                <ol style="margin:6px 0 0 0;padding-left:20px">
+                  <li>Create a Google Group in your Workspace admin console.</li>
+                  <li>Create a GCP project and enable the Admin SDK API.</li>
+                  <li>Create a Service Account and download the JSON key.</li>
+                  <li>Paste the JSON key contents into the text area on the left.</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:40px;display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <h2 class="page-title" style="margin:0">🔒 Authorized Guards (Access Revocation Control)</h2>
+          <button class="btn btn-primary" onclick="openModal('modal-add-auth-guard')">+ Authorize Guard</button>
+        </div>
+        <div class="card">
+          <div class="table-wrap"><table>
+            <thead><tr><th>Name</th><th>Email</th><th>Assigned Gate</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
+            <tbody id="auth-guards-table"></tbody>
+          </table></div>
+        </div>
       </div>
 
       <!-- Billing -->
@@ -209,7 +287,6 @@
           </div>
         </div>
         <div class="card">
-          <div class="card-header">All Invoices</div>
           <div class="table-wrap"><table>
             <thead><tr><th>Invoice #</th><th>Flat</th><th>Amount</th><th>Due</th><th>Status</th></tr></thead>
             <tbody id="invoices-table"></tbody>
@@ -322,8 +399,28 @@
         <option value="morning">Morning</option><option value="afternoon">Afternoon</option><option value="night">Night</option>
       </select>
     </div>
-    <div class="form-group"><label>Monthly Salary (₹)</label><input id="s-salary" class="form-control" type="text" pattern="[0-9]*" inputmode="numeric"></div>
+    <div class="form-group"><label>Monthly Salary (₹)</label><input id="s-salary" class="form-control" type="number"></div>
     <button class="btn btn-primary btn-full" onclick="addStaff()">Add Staff</button>
+  </div>
+</div>
+
+<div id="modal-add-auth-guard" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-add-auth-guard')">
+  <div class="modal-box">
+    <div class="modal-title">Authorize Guard</div>
+    <div class="form-group"><label>Gmail / Corporate Email *</label><input id="ag-email" class="form-control" type="email" placeholder="guard@gmail.com"></div>
+    <div class="form-group"><label>Guard Full Name</label><input id="ag-name" class="form-control" type="text" placeholder="Rajan Kumar"></div>
+    <div class="form-group"><label>Gate Code / ID</label><input id="ag-gate" class="form-control" type="text" placeholder="GATE-A"></div>
+    <button class="btn btn-primary btn-full" onclick="addAuthGuard()">Authorize Access</button>
+  </div>
+</div>
+
+<div id="modal-add-mock-member" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-add-mock-member')">
+  <div class="modal-box">
+    <div class="modal-title">Add Mock Google Group Member</div>
+    <div class="form-group"><label>Gmail / Google Email *</label><input id="mm-email" class="form-control" type="email" placeholder="guard@gmail.com"></div>
+    <div class="form-group"><label>Guard Full Name</label><input id="mm-name" class="form-control" type="text" placeholder="Rajan Kumar"></div>
+    <div class="form-group"><label>Gate Code / ID</label><input id="mm-gate" class="form-control" type="text" placeholder="GATE-A"></div>
+    <button class="btn btn-primary btn-full" onclick="addMockMemberToList()">Add to Mock Google Group</button>
   </div>
 </div>
 
@@ -331,7 +428,7 @@
   <div class="modal-box">
     <div class="modal-title">New Billing Head</div>
     <div class="form-group"><label>Name *</label><input id="bh-name" class="form-control" type="text"></div>
-    <div class="form-group"><label>Amount (₹)</label><input id="bh-amount" class="form-control" type="text" pattern="[0-9]*" inputmode="numeric"></div>
+    <div class="form-group"><label>Amount (₹)</label><input id="bh-amount" class="form-control" type="number"></div>
     <div class="form-group"><label>Frequency</label>
       <select id="bh-freq" class="form-control">
         <option value="monthly">Monthly</option><option value="quarterly">Quarterly</option>
@@ -341,7 +438,7 @@
     <div class="form-group" style="display:flex;align-items:center;gap:8px">
       <input type="checkbox" id="bh-gst"><label>GST Applicable</label>
     </div>
-    <div class="form-group"><label>GST %</label><input id="bh-gst-pct" class="form-control" type="text" value="18" pattern="[0-9]*" inputmode="numeric"></div>
+    <div class="form-group"><label>GST %</label><input id="bh-gst-pct" class="form-control" type="number" value="18"></div>
     <button class="btn btn-primary btn-full" onclick="addBillingHead()">Save</button>
   </div>
 </div>
@@ -350,9 +447,9 @@
   <div class="modal-box">
     <div class="modal-title">Add Amenity</div>
     <div class="form-group"><label>Name *</label><input id="am-name" class="form-control" type="text" placeholder="Clubhouse, Pool, Gym..."></div>
-    <div class="form-group"><label>Capacity</label><input id="am-cap" class="form-control" type="text" pattern="[0-9]*" inputmode="numeric"></div>
-    <div class="form-group"><label>Charge per slot (₹)</label><input id="am-charge" class="form-control" type="text" value="0" pattern="[0-9]*" inputmode="numeric"></div>
-    <div class="form-group"><label>Advance booking days</label><input id="am-adv" class="form-control" type="text" value="7" pattern="[0-9]*" inputmode="numeric"></div>
+    <div class="form-group"><label>Capacity</label><input id="am-cap" class="form-control" type="number"></div>
+    <div class="form-group"><label>Charge per slot (₹)</label><input id="am-charge" class="form-control" type="number" value="0"></div>
+    <div class="form-group"><label>Advance booking days</label><input id="am-adv" class="form-control" type="number" value="7"></div>
     <button class="btn btn-primary btn-full" onclick="addAmenity()">Create Amenity</button>
   </div>
 </div>
@@ -364,7 +461,6 @@
   <div class="modal-box" style="max-width:560px;max-height:90vh;overflow-y:auto">
     <div class="modal-title" id="resident-modal-title">Add Resident</div>
 
-    <!-- Resident fields -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="form-group" style="grid-column:1/-1">
         <label>Full Name *</label>
@@ -388,7 +484,7 @@
       </div>
       <div class="form-group">
         <label>Floor *</label>
-        <input id="res-floor" class="form-control" type="text" placeholder="e.g. 3" pattern="[0-9]*" inputmode="numeric">
+        <input id="res-floor" class="form-control" type="number" min="1" placeholder="e.g. 3">
       </div>
       <div class="form-group" style="grid-column:1/-1">
         <label>Flat Number *</label>
@@ -399,15 +495,12 @@
 
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
 
-    <!-- Family Members — always visible -->
     <div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <strong style="font-size:.9rem">Family Members</strong>
         <button class="btn btn-ghost" style="padding:3px 10px;font-size:.8rem" onclick="addFamilyRow()">+ Add Member</button>
       </div>
-      <div id="family-rows-container">
-        <!-- dynamic family rows injected here -->
-      </div>
+      <div id="family-rows-container"></div>
       <p id="family-empty-msg" style="font-size:.83rem;color:var(--muted)">No family members added yet.</p>
     </div>
 

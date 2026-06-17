@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MyGate — Resident</title>
 <script>
+  // Redirect to guard portal if auth token is present in the hash (fallback for default Supabase site URL)
+  if (window.location.hash && (window.location.hash.includes('access_token=') || window.location.hash.includes('error='))) {
+    window.location.replace('/guard/' + window.location.hash);
+  }
+
   // Catch early script loading or runtime errors and display a banner
   window.onerror = function(msg, url, line, col, error) {
     var banner = document.getElementById('early-error-banner') || document.createElement('div');
@@ -41,11 +46,13 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
+
 <!-- ── Login Screen ──────────────────────────────────────────────── -->
 <div id="login-screen" class="login-wrap">
   <div class="login-card">
     <div class="login-logo">🏠 MyGate</div>
     <p class="login-sub">Resident Portal</p>
+
     <div id="step-phone">
       <div class="form-group">
         <label>Mobile Number</label>
@@ -56,42 +63,101 @@
         <strong>Dev credentials</strong><br>Phone: <code>+912222222222</code>&nbsp;&nbsp;OTP: <code>222222</code>
       </div>
     </div>
+
     <div id="step-otp" style="display:none">
       <p style="margin-bottom:16px;color:var(--muted);font-size:.9rem">Enter the 6-digit OTP sent to <strong id="otp-phone-display"></strong></p>
       <div class="form-group">
         <label>OTP</label>
-        <input id="inp-otp" class="form-control" type="text" placeholder="_ _ _ _ _ _" maxlength="6" pattern="[0-9]*" inputmode="numeric">
+        <input id="inp-otp" class="form-control" type="number" placeholder="_ _ _ _ _ _" maxlength="6">
       </div>
       <button class="btn btn-primary btn-full btn-lg" onclick="verifyOtp()">Verify & Login</button>
       <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="resetLogin()">← Change number</button>
     </div>
   </div>
 </div>
+
 <!-- ── App Shell (hidden until logged in) ────────────────────────── -->
 <div id="app-shell" style="display:none">
   <div class="topbar">
     <span class="topbar-brand">🏠 MyGate</span>
-    <div style="display:flex;align-items:center;gap:10px">
-      <span class="topbar-user" id="user-name-display" onclick="showPage('page-profile')">My Profile</span>
+    <div style="display:flex;align-items:center;gap:12px;position:relative">
       <button class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+      <div class="user-menu-container">
+        <div class="topbar-user" id="topbar-user-trigger" onclick="toggleUserMenu()" style="display:flex;align-items:center;gap:8px;padding:4px 10px;border-radius:20px;background:var(--surface);border:1px solid var(--border);user-select:none">
+          <div style="text-align:right;display:flex;flex-direction:column;line-height:1.2">
+            <span id="user-name-display" style="font-weight:600;font-size:0.85rem;color:var(--text)">Resident</span>
+            <span id="user-flat-display" style="font-size:0.75rem;color:var(--muted)">Flat</span>
+          </div>
+          <div id="user-profile-avatar" style="width:30px;height:30px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:0.9rem;font-weight:700">R</div>
+        </div>
+        
+        <!-- Dropdown Menu -->
+        <div class="user-dropdown-menu" id="user-dropdown-menu">
+          <div style="padding:4px 8px">
+            <div id="dropdown-user-name" style="font-weight:700;font-size:0.95rem;color:var(--primary);word-break:break-all">Resident Name</div>
+            <div id="dropdown-user-flat" style="font-size:0.8rem;color:var(--muted);margin-top:4px">Resident · Flat</div>
+          </div>
+          <hr style="border:none;border-top:1px solid var(--border);margin:12px 0">
+          <a href="#" onclick="showPage('page-profile'); toggleUserMenu(); return false;" style="color:var(--text);font-weight:500;margin-bottom:6px">
+            <span style="font-size:1.1rem">👤</span> View Profile
+          </a>
+          <a href="#" onclick="logout(); return false;">
+            <span style="font-size:1.1rem">🔒</span> Logout
+          </a>
+        </div>
+      </div>
     </div>
   </div>
+
   <!-- Pages -->
   <div style="padding-bottom:64px">
+
     <!-- Dashboard -->
     <div id="page-dashboard" class="page active" style="padding:16px">
       <div class="stats-grid" id="dashboard-stats"></div>
+
       <!-- SOS -->
       <div style="text-align:center;margin:16px 0">
         <button class="sos-btn" onclick="triggerSOS()">SOS</button>
         <p style="font-size:.75rem;color:var(--muted);margin-top:6px">Tap for emergency help</p>
       </div>
+
+      <!-- Quick Actions -->
+      <div class="card quick-actions-card" style="margin-bottom:16px">
+        <div class="card-header" style="margin-bottom:12px">⚡ Quick Actions</div>
+        <div class="quick-actions-grid" style="display:grid;grid-template-columns:repeat(3, 1fr);gap:16px;text-align:center">
+          
+          <div class="quick-action-item" onclick="showPage('page-visitors');loadVisitors()">
+            <div class="quick-action-icon-box">
+              <span class="icon">👤</span>
+            </div>
+            <div class="quick-action-label">Visitor</div>
+          </div>
+
+          <div class="quick-action-item" onclick="showPage('page-vehicles');loadMyVehicles()">
+            <div class="quick-action-icon-box">
+              <span class="icon">🚗</span>
+            </div>
+            <div class="quick-action-label">Vehicle</div>
+          </div>
+
+          <div class="quick-action-item" onclick="showPage('page-helpers');loadHelpers()">
+            <div class="quick-action-icon-box">
+              <span class="icon">🧹</span>
+            </div>
+            <div class="quick-action-label">Helper</div>
+          </div>
+
+        </div>
+      </div>
+
       <!-- Pending approvals -->
       <div class="card">
         <div class="card-header">⏳ Pending Approvals</div>
         <div id="pending-visitors"></div>
       </div>
     </div>
+
     <!-- Visitors -->
     <div id="page-visitors" class="page" style="padding:16px">
       <h2 class="page-title">Visitors</h2>
@@ -103,11 +169,13 @@
       <div id="visitors-invites-panel"></div>
       <div id="visitors-history-panel" style="display:none"></div>
     </div>
+
     <!-- Deliveries -->
     <div id="page-delivery" class="page" style="padding:16px">
       <h2 class="page-title">Deliveries</h2>
       <div id="delivery-list"></div>
     </div>
+
     <!-- Domestic Help -->
     <div id="page-helpers" class="page" style="padding:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -116,6 +184,7 @@
       </div>
       <div id="helpers-list"></div>
     </div>
+
     <!-- Vehicles -->
     <div id="page-vehicles" class="page" style="padding:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -125,6 +194,7 @@
       <div id="vehicle-slot-bar" style="margin-bottom:16px"></div>
       <div id="vehicles-list"></div>
     </div>
+
     <!-- Community -->
     <div id="page-community" class="page" style="padding:16px">
       <h2 class="page-title">Community</h2>
@@ -136,11 +206,13 @@
       </div>
       <div id="community-content"></div>
     </div>
+
     <!-- Billing -->
     <div id="page-billing" class="page" style="padding:16px">
       <h2 class="page-title">Billing</h2>
       <div id="invoices-list"></div>
     </div>
+
     <!-- Profile -->
     <div id="page-profile" class="page" style="padding:16px">
       <h2 class="page-title">My Profile</h2>
@@ -161,17 +233,16 @@
         <button class="btn btn-ghost" style="margin-top:8px" onclick="logout()">Logout</button>
       </div>
     </div>
+
   </div>
+
   <!-- Bottom Nav -->
   <nav class="bottom-nav">
     <a href="#" data-page="page-dashboard" onclick="showPage('page-dashboard')"><span class="icon">🏠</span>Home</a>
-    <a href="#" data-page="page-visitors"  onclick="showPage('page-visitors');loadVisitors()"><span class="icon">👤</span>Visitors</a>
-    <a href="#" data-page="page-delivery"  onclick="showPage('page-delivery');loadDeliveries()"><span class="icon">📦</span>Deliveries</a>
-    <a href="#" data-page="page-vehicles"  onclick="showPage('page-vehicles');loadMyVehicles()"><span class="icon">🚗</span>Vehicles</a>
-    <a href="#" data-page="page-helpers"   onclick="showPage('page-helpers');loadHelpers()"><span class="icon">🧹</span>Helpers</a>
     <a href="#" data-page="page-community" onclick="showPage('page-community')"><span class="icon">🏘️</span>Community</a>
   </nav>
 </div>
+
 <!-- ── Modals ─────────────────────────────────────────────────────── -->
 <div id="modal-invite" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-invite')">
   <div class="modal-box">
@@ -190,6 +261,7 @@
     <button class="btn btn-primary btn-full" onclick="createInvite()">Send Invite</button>
   </div>
 </div>
+
 <div id="modal-add-helper" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-add-helper')">
   <div class="modal-box">
     <div class="modal-title">Add Daily Help</div>
@@ -206,6 +278,7 @@
     <button class="btn btn-primary btn-full" onclick="addHelper()">Add Helper</button>
   </div>
 </div>
+
 <div id="modal-sos-confirm" class="modal-overlay">
   <div class="modal-box" style="text-align:center">
     <div style="font-size:3rem;margin-bottom:12px">🚨</div>
@@ -217,6 +290,7 @@
     </div>
   </div>
 </div>
+
 <div id="modal-add-vehicle" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-add-vehicle')">
   <div class="modal-box">
     <div class="modal-title">Add Vehicle</div>
@@ -230,7 +304,9 @@
     <button class="btn btn-primary btn-full" onclick="addVehicle()">Register Vehicle</button>
   </div>
 </div>
+
 <div id="toast-container"></div>
+
 <script>window.MG_PORTAL = 'res';</script>
 <script src="/frontend/shared/api.js"></script>
 <script src="/frontend/resident/js/resident.js"></script>

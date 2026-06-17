@@ -68,14 +68,13 @@ def create_building():
         flat_rows = []
         for floor in range(1, floors + 1):
             for unit in range(1, flats_per_floor + 1):
-                flat_number = f"{floor}{unit:02d}"   # e.g. floor 1, unit 3 → "103"
+                flat_number = f"{floor}{unit:02d}"
                 flat_rows.append({
                     'society_id':  g.society_id,
                     'building_id': building_id,
                     'flat_number': flat_number,
                     'floor':       floor,
                 })
-        # Insert in batches of 50 to avoid request-size limits
         for i in range(0, len(flat_rows), 50):
             batch = flat_rows[i:i+50]
             sb.table('flats').insert(batch).execute()
@@ -98,14 +97,12 @@ def delete_building(building_id):
     existing = sb.table('buildings').select('id').eq('id', building_id).eq('society_id', g.society_id).maybe_single().execute()
     if not existing.data:
         return jsonify({'error': 'Building not found'}), 404
-    # Unlink residents from flats in this building before deletion
     flats = sb.table('flats').select('id').eq('building_id', building_id).execute().data or []
     flat_ids = [f['id'] for f in flats]
     if flat_ids:
         for fid in flat_ids:
             sb.table('user_profiles').update({'flat_id': None}).eq('flat_id', fid).execute()
         sb.table('family_members').delete().in_('flat_id', flat_ids).execute()
-    # Delete flats (may fail if other FKs exist — handle gracefully)
     try:
         sb.table('flats').delete().eq('building_id', building_id).execute()
     except Exception:
@@ -142,7 +139,6 @@ def list_residents():
         'id, full_name, phone, role, flat_id, is_active, flats(flat_number, floor, building_id, buildings(name))'
     ).eq('society_id', g.society_id).in_('role', ['resident', 'tenant', 'committee_member']).execute().data or []
 
-    # Attach family members counts
     family_rows = sb.table('family_members').select('flat_id, id').eq('society_id', g.society_id).eq('is_active', True).execute().data or []
     fam_count = {}
     for f in family_rows:
@@ -156,20 +152,33 @@ def list_residents():
 @require_auth
 @require_role('super_admin', 'committee_member')
 def add_resident():
-    """Create a resident profile. Accepts building_id + floor + flat_number and
-    finds or creates the flat automatically."""
     data = request.get_json(silent=True) or {}
     if not data.get('full_name'):
         return jsonify({'error': 'full_name is required'}), 400
 
     sb = get_admin_client()
     flat_id = _resolve_flat_id(sb, data)
-    if isinstance(flat_id, tuple):   # error tuple
+    if isinstance(flat_id, tuple):
         return flat_id
 
     role = data.get('role', 'resident')
     if role not in ('resident', 'tenant', 'committee_member'):
         return jsonify({'error': 'Invalid role'}), 400
+
+    # Prevent adding another resident to the same flat (if already occupied)
+    try:
+        existing_member = sb.table('user_profiles')\
+            .select('id, full_name, role')\
+            .eq('flat_id', flat_id)\
+            .eq('society_id', g.society_id)\
+            .in_('role', ['resident', 'tenant', 'committee_member'])\
+            .eq('is_active', True)\
+            .limit(1)\
+            .execute()
+        if existing_member.data:
+            return jsonify({'error': 'Already resident exists in this flat', 'member': existing_member.data[0]}), 409
+    except Exception as e:
+        return jsonify({'error': f'Duplicate check failed: {str(e)}'}), 500
 
     phone = (data.get('phone') or '').strip() or None
     if phone:
@@ -214,12 +223,6 @@ def add_resident():
 
 
 def _resolve_flat_id(sb, data):
-    """Given request data with either flat_id OR (building_id + floor + flat_number),
-    return the flat UUID (creating the flat if it doesn't exist yet).
-    Returns an error response tuple on failure."""
-    import re as _re
-
-    # Direct flat_id takes priority (used by internal calls)
     if data.get('flat_id'):
         flat = sb.table('flats').select('id').eq('id', data['flat_id']).eq('society_id', g.society_id).limit(1).execute()
         if not flat.data:
@@ -235,17 +238,14 @@ def _resolve_flat_id(sb, data):
     if flat_number == '':
         return jsonify({'error': 'flat_number is required'}), 400
 
-    # Validate building belongs to this society
     bldg = sb.table('buildings').select('id, floors').eq('id', building_id).eq('society_id', g.society_id).limit(1).execute()
     if not bldg.data:
         return jsonify({'error': 'Building not found in this society'}), 404
 
-    # Try to find existing flat
     q = sb.table('flats').select('id').eq('building_id', building_id).eq('flat_number', flat_number).limit(1).execute()
     if q.data:
         return q.data[0]['id']
 
-    # Create the flat
     result = sb.table('flats').insert({
         'society_id':  g.society_id,
         'building_id': building_id,
@@ -266,7 +266,6 @@ def update_resident(resident_id):
     if not existing.data:
         return jsonify({'error': 'Resident not found'}), 404
 
-    # Resolve flat from building/floor/flatno if provided
     if data.get('building_id') or data.get('flat_number'):
         flat_id = _resolve_flat_id(sb, data)
         if isinstance(flat_id, tuple):
@@ -288,47 +287,146 @@ def update_resident(resident_id):
 @require_role('super_admin')
 def delete_resident(resident_id):
     sb = get_admin_client()
-    existing = sb.table('user_profiles').select('id, flat_id').eq('id', resident_id).eq('society_id', g.society_id).limit(1).execute()
+    existing = sb.table('user_profiles').select('id').eq('id', resident_id).eq('society_id', g.society_id).maybe_single().execute()
     if not existing.data:
         return jsonify({'error': 'Resident not found'}), 404
-
-    flat_id = existing.data[0].get('flat_id')
-
-    # Delete or null-out all FK references before deleting the profile row.
-    # For content created by this user, delete it entirely:
-    _delete_refs = [
-        ('notices',          'posted_by'),
-        ('polls',            'created_by'),
-        ('events',           'created_by'),
-        ('forum_posts',      'posted_by'),
-        ('forum_comments',   'posted_by'),
-        ('ticket_updates',   'updated_by'),
-        ('security_alerts',  'triggered_by'),
-        ('visitor_otps',     'created_by'),
-    ]
-    for table, col in _delete_refs:
-        try:
-            sb.table(table).delete().eq(col, resident_id).execute()
-        except Exception:
-            pass
-
-    # For assigned references, null them out:
     try:
-        sb.table('helpdesk_tickets').update({'raised_by': None}).eq('raised_by', resident_id).execute()
+        sb.table('family_members').delete().eq('flat_id',
+            sb.table('user_profiles').select('flat_id').eq('id', resident_id).maybe_single().execute().data.get('flat_id', '')
+        ).execute()
     except Exception:
         pass
+    # --- Cascade-delete common dependent rows referencing this user ---
     try:
-        sb.table('helpdesk_tickets').update({'assigned_to': None}).eq('assigned_to', resident_id).execute()
+        sb.table('visitor_otps').delete().eq('created_by', resident_id).execute()
     except Exception:
         pass
 
-    # Delete family members linked to this flat
-    if flat_id:
-        try:
-            sb.table('family_members').delete().eq('flat_id', flat_id).execute()
-        except Exception:
-            pass
+    # Delete vehicle entry logs first (they reference vehicles), then vehicles
+    try:
+        v_res = sb.table('vehicles').select('id').eq('owner_id', resident_id).execute()
+        v_ids = [v['id'] for v in (v_res.data or [])]
+        if v_ids:
+            sb.table('vehicle_entry_logs').delete().in_('vehicle_id', v_ids).execute()
+    except Exception:
+        pass
 
+    try:
+        sb.table('vehicles').delete().eq('owner_id', resident_id).execute()
+    except Exception:
+        pass
+
+    try:
+        sb.table('helper_flat_links').delete().eq('resident_id', resident_id).execute()
+    except Exception:
+        pass
+
+    try:
+        sb.table('helper_ratings').delete().eq('resident_id', resident_id).execute()
+    except Exception:
+        pass
+
+    # Notices acknowledgments, event RSVPs and poll votes by this resident
+    try:
+        sb.table('notice_acknowledgments').delete().eq('resident_id', resident_id).execute()
+    except Exception:
+        pass
+
+    try:
+        sb.table('event_rsvp').delete().eq('resident_id', resident_id).execute()
+    except Exception:
+        pass
+
+    try:
+        sb.table('poll_votes').delete().eq('voter_id', resident_id).execute()
+    except Exception:
+        pass
+
+    # Polls created by this resident (remove votes/options first)
+    try:
+        polls = sb.table('polls').select('id').eq('created_by', resident_id).execute().data or []
+        poll_ids = [p['id'] for p in polls]
+        if poll_ids:
+            sb.table('poll_votes').delete().in_('poll_id', poll_ids).execute()
+            sb.table('poll_options').delete().in_('poll_id', poll_ids).execute()
+            sb.table('polls').delete().in_('id', poll_ids).execute()
+    except Exception:
+        pass
+
+    # Events created by this resident (remove RSVPs first)
+    try:
+        events = sb.table('events').select('id').eq('created_by', resident_id).execute().data or []
+        event_ids = [e['id'] for e in events]
+        if event_ids:
+            sb.table('event_rsvp').delete().in_('event_id', event_ids).execute()
+            sb.table('events').delete().in_('id', event_ids).execute()
+    except Exception:
+        pass
+
+    # Forum threads/replies
+    try:
+        threads = sb.table('forum_threads').select('id').eq('created_by', resident_id).execute().data or []
+        thread_ids = [t['id'] for t in threads]
+        if thread_ids:
+            sb.table('forum_replies').delete().in_('thread_id', thread_ids).execute()
+            sb.table('forum_threads').delete().in_('id', thread_ids).execute()
+    except Exception:
+        pass
+
+    try:
+        sb.table('forum_replies').delete().eq('posted_by', resident_id).execute()
+    except Exception:
+        pass
+
+    # Personal and society documents uploaded by this user
+    try:
+        sb.table('personal_documents').delete().eq('uploaded_by', resident_id).execute()
+    except Exception:
+        pass
+    try:
+        sb.table('society_documents').delete().eq('uploaded_by', resident_id).execute()
+    except Exception:
+        pass
+
+    # Helpdesk tickets and updates
+    try:
+        tickets = sb.table('helpdesk_tickets').select('id').eq('raised_by', resident_id).execute().data or []
+        ticket_ids = [t['id'] for t in tickets]
+        if ticket_ids:
+            sb.table('ticket_updates').delete().in_('ticket_id', ticket_ids).execute()
+            sb.table('helpdesk_tickets').delete().in_('id', ticket_ids).execute()
+    except Exception:
+        pass
+    try:
+        sb.table('ticket_updates').delete().eq('updated_by', resident_id).execute()
+    except Exception:
+        pass
+
+    # Security alerts triggered by this resident
+    try:
+        sb.table('security_alerts').delete().eq('triggered_by', resident_id).execute()
+    except Exception:
+        pass
+
+    # Notices posted by this resident
+    try:
+        sb.table('notices').delete().eq('posted_by', resident_id).execute()
+    except Exception:
+        pass
+
+    # Expenses recorded by this resident
+    try:
+        sb.table('expenses').delete().eq('recorded_by', resident_id).execute()
+    except Exception:
+        pass
+
+    # Visitor logs where this resident was the guard
+    try:
+        sb.table('visitor_logs').delete().eq('guard_id', resident_id).execute()
+    except Exception:
+        pass
+
+    # Finally, remove the user profile itself
     sb.table('user_profiles').delete().eq('id', resident_id).execute()
     return jsonify({'deleted': True})
 
@@ -426,3 +524,176 @@ def change_user_role(user_id):
     sb = get_admin_client()
     sb.table('user_profiles').update({'role': role}).eq('id', user_id).execute()
     return jsonify({'role': role})
+
+
+# ── Authorized Guards (Google Group Authentication Integration) ───────────────
+@admin_bp.get('/authorized-guards')
+@require_auth
+@require_role('super_admin', 'committee_member')
+def list_authorized_guards():
+    sb = get_admin_client()
+    try:
+        res = sb.table('authorized_guards').select('*').order('created_at', desc=True).execute()
+        return jsonify(res.data)
+    except Exception as e:
+        if 'authorized_guards' in str(e):
+            return jsonify({
+                'error': 'Database table authorized_guards is not configured.',
+                'detail': 'Please run the SQL Table Setup in your Supabase SQL Editor first.'
+            }), 500
+        return jsonify({'error': str(e)}), 400
+
+@admin_bp.post('/authorized-guards')
+@require_auth
+@require_role('super_admin', 'committee_member')
+def add_authorized_guard():
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    name = (data.get('name') or '').strip()
+    gate_id = (data.get('gate_id') or '').strip()
+    if not email:
+        return jsonify({'error': 'email is required'}), 400
+    sb = get_admin_client()
+    try:
+        result = sb.table('authorized_guards').insert({
+            'email': email,
+            'name': name,
+            'gate_id': gate_id or None,
+            'active': True
+        }).execute()
+        return jsonify(result.data[0]), 201
+    except Exception as e:
+        if 'authorized_guards' in str(e):
+            return jsonify({
+                'error': 'Database table authorized_guards is not configured.',
+                'detail': 'Please run the SQL Table Setup in your Supabase SQL Editor first.'
+            }), 500
+        return jsonify({'error': str(e)}), 400
+
+@admin_bp.patch('/authorized-guards/<guard_id>')
+@require_auth
+@require_role('super_admin', 'committee_member')
+def update_authorized_guard(guard_id):
+    data = request.get_json(silent=True) or {}
+    allowed = ['active', 'name', 'gate_id']
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates and 'active' not in data:
+        return jsonify({'error': 'No valid fields to update'}), 400
+    sb = get_admin_client()
+    try:
+        result = sb.table('authorized_guards').update(updates).eq('id', guard_id).execute()
+        return jsonify(result.data[0] if result.data else {})
+    except Exception as e:
+        if 'authorized_guards' in str(e):
+            return jsonify({
+                'error': 'Database table authorized_guards is not configured.',
+                'detail': 'Please run the SQL Table Setup in your Supabase SQL Editor first.'
+            }), 500
+        return jsonify({'error': str(e)}), 400
+
+@admin_bp.delete('/authorized-guards/<guard_id>')
+@require_auth
+@require_role('super_admin', 'committee_member')
+def delete_authorized_guard(guard_id):
+    sb = get_admin_client()
+    try:
+        sb.table('authorized_guards').delete().eq('id', guard_id).execute()
+        return jsonify({'deleted': True})
+    except Exception as e:
+        if 'authorized_guards' in str(e):
+            return jsonify({
+                'error': 'Database table authorized_guards is not configured.',
+                'detail': 'Please run the SQL Table Setup in your Supabase SQL Editor first.'
+            }), 500
+        return jsonify({'error': str(e)}), 400
+
+
+# ── Google Group Settings & Sync Endpoints ────────────────────────────────────
+@admin_bp.get('/google-group/config')
+@require_auth
+@require_role('super_admin', 'committee_member')
+def get_google_group_config():
+    from ..utils.google_groups import load_config
+    cfg = load_config()
+    return jsonify({
+        'group_email': cfg.get('group_email', ''),
+        'integration_mode': cfg.get('integration_mode', 'mock'),
+        'has_service_account': bool(cfg.get('service_account_json'))
+    })
+
+
+@admin_bp.post('/google-group/config')
+@require_auth
+@require_role('super_admin', 'committee_member')
+def save_google_group_config():
+    data = request.get_json(silent=True) or {}
+    group_email = (data.get('group_email') or '').strip().lower()
+    integration_mode = data.get('integration_mode', 'mock')
+    service_account_json = data.get('service_account_json', '')
+
+    if not group_email:
+        return jsonify({'error': 'Group email is required'}), 400
+    if integration_mode not in ('mock', 'real'):
+        return jsonify({'error': 'Invalid integration mode'}), 400
+
+    from ..utils.google_groups import load_config, save_config
+    cfg = load_config()
+    cfg['group_email'] = group_email
+    cfg['integration_mode'] = integration_mode
+    if service_account_json.strip():
+        cfg['service_account_json'] = service_account_json.strip()
+
+    if save_config(cfg):
+        return jsonify({'message': 'Configuration saved successfully'})
+    return jsonify({'error': 'Failed to save configuration'}), 500
+
+
+@admin_bp.post('/google-group/sync')
+@require_auth
+@require_role('super_admin', 'committee_member')
+def sync_google_group():
+    from ..utils.google_groups import sync_google_group_to_db
+    from flask import current_app
+    res = sync_google_group_to_db(current_app)
+    if res.get('success'):
+        return jsonify(res)
+    return jsonify({'error': res.get('error', 'Sync failed')}), 500
+
+
+@admin_bp.get('/google-group/mock-members')
+@require_auth
+@require_role('super_admin', 'committee_member')
+def get_mock_members():
+    from ..utils.google_groups import load_config
+    cfg = load_config()
+    return jsonify(cfg.get('mock_members', []))
+
+
+@admin_bp.post('/google-group/mock-members')
+@require_auth
+@require_role('super_admin', 'committee_member')
+def save_mock_members():
+    data = request.get_json(silent=True)
+    if not isinstance(data, list):
+        return jsonify({'error': 'Data must be an array of members'}), 400
+
+    # Validate members format
+    validated = []
+    for idx, item in enumerate(data):
+        email = (item.get('email') or '').strip().lower()
+        name = (item.get('name') or '').strip()
+        gate_id = (item.get('gate_id') or 'GATE-A').strip()
+        if not email:
+            return jsonify({'error': f'Email is required for member at index {idx}'}), 400
+        validated.append({
+            'email': email,
+            'name': name or 'Google Group Guard',
+            'gate_id': gate_id or 'GATE-A'
+        })
+
+    from ..utils.google_groups import load_config, save_config
+    cfg = load_config()
+    cfg['mock_members'] = validated
+    if save_config(cfg):
+        return jsonify({'message': 'Mock members updated successfully', 'members': validated})
+    return jsonify({'error': 'Failed to save mock members'}), 500

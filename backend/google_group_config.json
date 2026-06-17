@@ -1,0 +1,22 @@
+{
+  "group_email": "security-block-a@yoursociety.com",
+  "integration_mode": "mock",
+  "service_account_json": "",
+  "mock_members": [
+    {
+      "email": "guard1@gmail.com",
+      "name": "Rajan Kumar",
+      "gate_id": "GATE-A"
+    },
+    {
+      "email": "guard2@gmail.com",
+      "name": "Suresh Pal",
+      "gate_id": "GATE-B"
+    },
+    {
+      "email": "bhavanavraja@gmail.com",
+      "name": "Rajan Kumar",
+      "gate_id": "GATE-A"
+    }
+  ]
+}

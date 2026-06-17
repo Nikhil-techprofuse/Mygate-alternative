@@ -143,6 +143,41 @@ def mark_collected(delivery_id):
     return jsonify({'status': 'collected', 'collected_at': now})
 
 
+@delivery_bp.patch('/<delivery_id>/status')
+@require_auth
+@require_role('guard')
+def update_delivery_status(delivery_id):
+    """Guard updates the status of a delivery (e.g. arrived, left_at_gate, collected)."""
+    data = request.get_json(silent=True) or {}
+    new_status = data.get('status')
+    if new_status not in ('arrived', 'left_at_gate', 'collected'):
+        return jsonify({'error': "Invalid status. Must be 'arrived', 'left_at_gate', or 'collected'"}), 400
+
+    sb = get_admin_client()
+    d = sb.table('deliveries').select('id, status').eq('id', delivery_id).eq('society_id', g.society_id).maybe_single().execute()
+    if not d.data:
+        return jsonify({'error': 'Delivery not found'}), 404
+
+    now = datetime.now(timezone.utc).isoformat()
+    updates = {'status': new_status}
+    if new_status == 'collected':
+        updates['collected_at'] = now
+        updates['parcel_otp_used'] = True
+    elif new_status == 'left_at_gate':
+        updates['exit_time'] = now
+        updates['leave_at_gate'] = True
+        updates['collected_at'] = None
+        updates['parcel_otp_used'] = False
+    elif new_status == 'arrived':
+        updates['exit_time'] = None
+        updates['leave_at_gate'] = False
+        updates['collected_at'] = None
+        updates['parcel_otp_used'] = False
+
+    sb.table('deliveries').update(updates).eq('id', delivery_id).execute()
+    return jsonify({'status': new_status})
+
+
 @delivery_bp.get('/')
 @require_auth
 def list_deliveries():
@@ -153,7 +188,11 @@ def list_deliveries():
     else:
         q = q.eq('society_id', g.society_id)
         if request.args.get('status'):
-            q = q.eq('status', request.args['status'])
+            status_list = request.args['status'].split(',')
+            if len(status_list) > 1:
+                q = q.in_('status', status_list)
+            else:
+                q = q.eq('status', status_list[0])
     return jsonify(q.order('entry_time', desc=True).limit(200).execute().data)
 
 

@@ -52,6 +52,14 @@ async function apiFetch(path, options = {}) {
     Auth.clear();
     window.location.href = '/';
   }
+  if (res.status === 403) {
+    const data = await res.clone().json().catch(() => ({}));
+    if (data && data.error && data.error.includes('Access revoked')) {
+      Auth.clear();
+      localStorage.setItem('revoked_msg', data.error);
+      window.location.reload();
+    }
+  }
   return res;
 }
 
@@ -114,6 +122,24 @@ function statusBadge(status) {
     pending: 'warning', pending_payment: 'warning', in_progress: 'warning',
     denied: 'danger', rejected: 'danger', overstay: 'danger', cancelled: 'danger',
     sent: 'info', acknowledged: 'info',
+    arrived: 'warning', left_at_gate: 'info'
   };
-  return `<span class="badge badge-${map[status] || 'muted'}">${status?.replace(/_/g,' ')}</span>`;
+  const labels = {
+    arrived: 'Pending',
+    left_at_gate: 'Received at Gate',
+    collected: 'Collected'
+  };
+  const label = labels[status] || status?.replace(/_/g,' ');
+  return `<span class="badge badge-${map[status] || 'muted'}">${label}</span>`;
 }
+
+window.addEventListener('DOMContentLoaded', () => {
+  const revokedMsg = localStorage.getItem('revoked_msg');
+  if (revokedMsg) {
+    // Wait slightly for DOM to settle and toast-container to exist
+    setTimeout(() => {
+      toast(revokedMsg, 'error');
+    }, 100);
+    localStorage.removeItem('revoked_msg');
+  }
+});

@@ -18,11 +18,16 @@ function showFlatSelection() {
     }
     _flatSelectionProfile = await res.json();
 
-    // Pre-populate name in topbar if we already have it from a previous session
-    if (_flatSelectionProfile?.full_name) {
-      const nameEl = document.getElementById('user-name-text');
-      if (nameEl) nameEl.textContent = _flatSelectionProfile.full_name;
-      populateProfileDropdown(_flatSelectionProfile);
+    // If flat is already assigned to this pre-registered resident, bypass the selection screen
+    if (_flatSelectionProfile.flat_id && _flatSelectionProfile.flat_id !== '00000000-0000-0000-0000-000000000000') {
+      localStorage.setItem((window.MG_PORTAL || 'mg') + '_flat_id', _flatSelectionProfile.flat_id);
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('flat-selection-screen').style.display = 'none';
+      document.getElementById('app-shell').style.display = 'block';
+      loadDashboard();
+      subscribeVisitorApprovals();
+      subscribeDeliveryUpdates();
+      return;
     }
 
     document.getElementById('login-screen').style.display = 'none';
@@ -83,8 +88,13 @@ async function _loadAndRenderFlatOptions(buildingId, selectedFlatId = '') {
     hint.textContent = 'Choose building first, then flat number.';
     return;
   }
+  
   const building = _residentFlatData.find(b => b.id === buildingId);
   const flats = building ? building.flats : [];
+  
+  // Sort flats numerically
+  flats.sort((a, b) => a.flat_number.localeCompare(b.flat_number, undefined, {numeric: true, sensitivity: 'base'}));
+  
   fSel.innerHTML = '<option value="">Select flat number</option>';
   flats.forEach(fl => {
     fSel.insertAdjacentHTML('beforeend', `<option value="${fl.id}">${fl.flat_number}</option>`);
@@ -112,19 +122,6 @@ async function confirmFlatSelection() {
   }
 
   localStorage.setItem((window.MG_PORTAL || 'mg') + '_flat_id', flatId);
-
-  // Fetch fresh profile now that flat_id is set — the name bypass runs on this call
-  try {
-    const profRes = await apiFetch('/auth/me');
-    if (profRes.ok) {
-      const freshProfile = await profRes.json();
-      const name = freshProfile.full_name || _flatSelectionProfile?.full_name || 'Resident';
-      const nameEl = document.getElementById('user-name-text');
-      if (nameEl) nameEl.textContent = name;
-      populateProfileDropdown({ ...freshProfile, full_name: name });
-    }
-  } catch (_) { /* non-fatal */ }
-
   document.getElementById('flat-selection-screen').style.display = 'none';
   document.getElementById('app-shell').style.display = 'block';
   loadDashboard();
@@ -197,14 +194,16 @@ function getFlatId() {
 }
 
 async function loadDashboard() {
-  const [profRes, visRes, delRes] = await Promise.all([
+  const [profRes, visRes, delRes, flatNameRes] = await Promise.all([
     apiFetch('/auth/me'),
     apiFetch('/visitors/?limit=5'),
     apiFetch('/delivery/?status=arrived'),
+    apiFetch('/auth/flat-resident'),
   ]);
   _myProfile   = profRes.ok  ? await profRes.json()  : {};
   const visitors   = visRes.ok   ? await visRes.json()   : [];
   const deliveries = delRes.ok ? await delRes.json()   : [];
+  const flatName   = flatNameRes.ok ? await flatNameRes.json() : {};
 
   if (_myProfile.flat_id) {
     localStorage.setItem((window.MG_PORTAL || 'mg') + '_flat_id', _myProfile.flat_id);
@@ -214,8 +213,25 @@ async function loadDashboard() {
     ? (_myProfile.flats.buildings?.name ? `${_myProfile.flats.buildings.name} – ${_myProfile.flats.flat_number}` : _myProfile.flats.flat_number)
     : '—';
 
-  document.getElementById('user-name-text').textContent = _myProfile.full_name || 'Profile';
-  populateProfileDropdown(_myProfile);
+  const name = flatName.resident_name || _myProfile.full_name || 'Resident';
+
+  const nameEl = document.getElementById('user-name-display');
+  if (nameEl) nameEl.textContent = name;
+
+  const flatEl = document.getElementById('user-flat-display');
+  if (flatEl) flatEl.textContent = flatLabel;
+
+  const avatarEl = document.getElementById('user-profile-avatar');
+  if (avatarEl && name) {
+    avatarEl.textContent = name.charAt(0).toUpperCase();
+  }
+
+  const dropdownNameEl = document.getElementById('dropdown-user-name');
+  if (dropdownNameEl) dropdownNameEl.textContent = name;
+
+  const dropdownFlatEl = document.getElementById('dropdown-user-flat');
+  if (dropdownFlatEl) dropdownFlatEl.textContent = `Resident · ${flatLabel}`;
+
   if (_myProfile.kids_checkout_enabled !== undefined) {
     document.getElementById('kids-checkout-toggle').checked = _myProfile.kids_checkout_enabled;
   }
@@ -240,42 +256,6 @@ async function loadDashboard() {
     ? gateDeliveries.map(d => deliveryOTPCard(d)).join('')
     : '<p style="color:var(--muted);font-size:.9rem;text-align:center;padding:12px">No deliveries left at gate</p>';
 }
-
-// ── Profile Dropdown ──────────────────────────────────────────────────────
-function toggleProfileDropdown() {
-  const dd = document.getElementById('profile-dropdown');
-  const isOpen = dd.style.display === 'block';
-  dd.style.display = isOpen ? 'none' : 'block';
-}
-
-function populateProfileDropdown(profile) {
-  if (!profile) return;
-  // Name
-  const name = profile.full_name || 'Resident';
-  document.getElementById('pd-name').textContent = name;
-  // Avatar initials
-  const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-  document.getElementById('profile-avatar').textContent = initials || '?';
-  // Role
-  document.getElementById('pd-role').textContent = (profile.role || 'resident').replace('_', ' ');
-  // Phone
-  document.getElementById('pd-phone').textContent = profile.phone || '—';
-  // Flat
-  const flat = profile.flats;
-  const flatLabel = flat?.flat_number
-    ? (flat.buildings?.name ? `${flat.buildings.name} – ${flat.flat_number}` : flat.flat_number)
-    : '—';
-  document.getElementById('pd-flat').textContent = flatLabel;
-}
-
-// Close dropdown when clicking outside
-document.addEventListener('click', (e) => {
-  const dd = document.getElementById('profile-dropdown');
-  const btn = document.getElementById('user-name-display');
-  if (dd && btn && !dd.contains(e.target) && !btn.contains(e.target)) {
-    dd.style.display = 'none';
-  }
-});
 
 function openInviteModal() {
   const flat = _myProfile.flats;
@@ -584,7 +564,7 @@ function deliveryOTPCard(d) {
           <strong style="font-size:1.05rem">${company}</strong>
           <div style="font-size:.8rem;color:var(--muted);margin-top:2px">${d.tracking_id || 'No tracking ID'}</div>
         </div>
-        <span class="badge badge-warning">Left at Gate</span>
+        ${statusBadge(d.status)}
       </div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center">
         <div style="font-size:.75rem;color:var(--muted);margin-bottom:4px">COLLECTION CODE</div>
@@ -592,7 +572,7 @@ function deliveryOTPCard(d) {
         <button class="btn btn-ghost" style="margin-top:6px;padding:4px 12px;font-size:.8rem" onclick="navigator.clipboard.writeText('${d.parcel_otp}').then(()=>toast('Code copied!','success'))">📋 Copy Code</button>
       </div>
       <div style="margin-top:8px;font-size:.8rem;color:var(--muted)">
-        Left at: ${fmtDate(d.exit_time)} · Show this code to guard for collection
+        Received at gate: ${fmtDate(d.exit_time || d.entry_time)} · Show this code to guard for collection
       </div>
     </div>`;
 }
@@ -745,8 +725,8 @@ async function loadForum() {
 // ── Profile ───────────────────────────────────────────────────────────────
 async function saveProfile() {
   const body = {
-    full_name: (_myProfile.full_name || '').trim(),
-    email:     (_myProfile.email    || '').trim(),
+    full_name: document.getElementById('profile-name').value.trim(),
+    email:     document.getElementById('profile-email').value.trim(),
   };
   const res = await apiFetch('/auth/me', { method: 'PATCH', body: JSON.stringify(body) });
   if (res.ok) {
@@ -755,8 +735,11 @@ async function saveProfile() {
   } else toast('Failed to save', 'error');
 }
 
-// Pre-fill removed — profile is now shown in dropdown only
-
+// Pre-fill profile page when navigated to
+document.querySelectorAll('[data-page="page-profile"]')?.forEach(el => el.addEventListener('click', () => {
+  if (_myProfile.full_name) document.getElementById('profile-name').value = _myProfile.full_name || '';
+  if (_myProfile.email)     document.getElementById('profile-email').value  = _myProfile.email || '';
+}));
 
 async function toggleKidsCheckout(enabled) {
   await apiFetch('/kids-checkout/toggle', { method: 'POST', body: JSON.stringify({ enabled }) });
@@ -851,3 +834,19 @@ async function loadBilling() {
 
 // Trigger billing load when page nav is clicked
 document.querySelectorAll('[data-page="page-billing"]')?.forEach(el => el.addEventListener('click', loadBilling));
+
+function toggleUserMenu() {
+  const menu = document.getElementById('user-dropdown-menu');
+  if (menu) menu.classList.toggle('show');
+}
+
+// Close dropdown when clicking outside
+window.addEventListener('click', (e) => {
+  const trigger = document.getElementById('topbar-user-trigger');
+  const menu = document.getElementById('user-dropdown-menu');
+  if (menu && menu.classList.contains('show')) {
+    if (!menu.contains(e.target) && (!trigger || !trigger.contains(e.target))) {
+      menu.classList.remove('show');
+    }
+  }
+});

@@ -102,6 +102,13 @@ function statusBadge(status) {
     pending: 'warning', pending_payment: 'warning', in_progress: 'warning',
     denied: 'danger', rejected: 'danger', overstay: 'danger', cancelled: 'danger',
     sent: 'info', acknowledged: 'info',
+    arrived: 'warning', left_at_gate: 'info'
   };
-  return `<span class="badge badge-${map[status] || 'muted'}">${status?.replace(/_/g,' ')}</span>`;
+  const labels = {
+    arrived: 'Pending',
+    left_at_gate: 'Received at Gate',
+    collected: 'Collected'
+  };
+  const label = labels[status] || status?.replace(/_/g,' ');
+  return `<span class="badge badge-${map[status] || 'muted'}">${label}</span>`;
 }

@@ -347,3 +347,104 @@ input[type=number] {
   width: 52px; height: 52px; border-radius: 50%; object-fit: cover;
 }
 
+/* User Menu Dropdown Styles */
+.user-menu-container {
+  position: relative;
+}
+.topbar-user {
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s, transform 0.15s;
+}
+.topbar-user:active {
+  transform: scale(0.97);
+}
+.user-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 260px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  z-index: 1000;
+  padding: 16px;
+  transform-origin: top right;
+  animation: dropdownFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.user-dropdown-menu.show {
+  display: block;
+}
+.user-dropdown-menu a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--danger);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 8px 12px;
+  margin: 0 -12px;
+  border-radius: 8px;
+  transition: background-color 0.2s, opacity 0.2s;
+}
+.user-dropdown-menu a:hover {
+  background-color: var(--hover-bg);
+}
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+/* Quick Actions Widget */
+.quick-actions-card {
+  padding: 16px !important;
+}
+.quick-action-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  text-decoration: none;
+}
+.quick-action-icon-box {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275), border-color 0.2s, background-color 0.2s;
+}
+.quick-action-icon-box .icon {
+  font-size: 1.8rem;
+  line-height: 1;
+}
+.quick-action-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+  transition: color 0.2s;
+}
+.quick-action-item:hover .quick-action-icon-box {
+  transform: translateY(-4px) scale(1.03);
+  border-color: var(--primary);
+  background-color: var(--hover-bg);
+}
+.quick-action-item:active .quick-action-icon-box {
+  transform: translateY(0) scale(0.95);
+}
+.quick-action-item:hover .quick-action-label {
+  color: var(--primary);
+}

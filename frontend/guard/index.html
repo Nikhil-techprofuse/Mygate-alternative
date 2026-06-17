@@ -19,6 +19,12 @@
   <div class="login-card">
     <div class="login-logo">🛡️ Guard</div>
     <p class="login-sub">Security Portal</p>
+    
+    <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:10px">
+      <button class="btn btn-primary" id="btn-phone-tab" onclick="switchLoginTab('phone')" style="flex:1;padding:6px;font-size:.85rem">📱 Phone OTP</button>
+      <button class="btn btn-ghost" id="btn-email-tab" onclick="switchLoginTab('email')" style="flex:1;padding:6px;font-size:.85rem">✉️ Email / Google</button>
+    </div>
+
     <div id="step-phone">
       <div class="form-group"><label>Mobile Number</label>
         <input id="inp-phone" class="form-control" type="tel" placeholder="+91 98765 43210">
@@ -28,6 +34,24 @@
         <strong>Dev credentials</strong><br>Phone: <code>+911111111111</code>&nbsp;&nbsp;OTP: <code>111111</code>
       </div>
     </div>
+
+    <div id="step-email" style="display:none">
+      <div class="form-group"><label>Email Address</label>
+        <input id="inp-email" class="form-control" type="email" placeholder="guard@gmail.com">
+      </div>
+      <button class="btn btn-primary btn-full btn-lg" onclick="sendEmailOtp()">Send Email OTP</button>
+      <div style="margin-top:16px;text-align:center">
+        <span style="font-size:.85rem;color:var(--muted)">— OR —</span>
+      </div>
+      <button class="btn btn-ghost btn-full" style="margin-top:12px;background:var(--card-bg);color:var(--text);display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600" onclick="loginWithGoogle()">
+        <img src="https://img.icons8.com/color/16/000000/google-logo.png" style="width:16px;height:16px">
+        Sign in with Google
+      </button>
+      <div class="dev-hint">
+        <strong>Dev credentials</strong><br>Email: <code>guard1@gmail.com</code>&nbsp;&nbsp;OTP: <code>111111</code>
+      </div>
+    </div>
+
     <div id="step-otp" style="display:none">
       <p style="margin-bottom:16px;font-size:.9rem;color:var(--muted)">OTP sent to <strong id="otp-phone-display"></strong></p>
       <div class="form-group"><label>OTP</label>
@@ -43,9 +67,29 @@
 <div id="app-shell" style="display:none">
   <div class="topbar">
     <span class="topbar-brand">🛡️ Guard App</span>
-    <div style="display:flex;align-items:center;gap:10px">
-      <span class="topbar-user" id="gate-name-display">Loading gate...</span>
+    <div style="display:flex;align-items:center;gap:12px;position:relative">
       <button class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+      <div class="user-menu-container">
+        <div class="topbar-user" id="topbar-user-trigger" onclick="toggleUserMenu()" style="display:flex;align-items:center;gap:8px;padding:4px 10px;border-radius:20px;background:var(--surface);border:1px solid var(--border);user-select:none">
+          <div style="text-align:right;display:flex;flex-direction:column;line-height:1.2">
+            <span id="guard-name-display" style="font-weight:600;font-size:0.85rem;color:var(--text)">Guard</span>
+            <span id="gate-name-display" style="font-size:0.75rem;color:var(--muted)">Gate</span>
+          </div>
+          <div id="guard-profile-avatar" style="width:30px;height:30px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:0.9rem;font-weight:700">G</div>
+        </div>
+        
+        <!-- Dropdown Menu -->
+        <div class="user-dropdown-menu" id="user-dropdown-menu">
+          <div style="padding:4px 8px">
+            <div id="dropdown-guard-name" style="font-weight:700;font-size:0.95rem;color:var(--primary);word-break:break-all">Guard Name</div>
+            <div id="dropdown-guard-gate" style="font-size:0.8rem;color:var(--muted);margin-top:4px">Security Guard · Gate</div>
+          </div>
+          <hr style="border:none;border-top:1px solid var(--border);margin:12px 0">
+          <a href="#" onclick="logout(); return false;">
+            <span style="font-size:1.1rem">🔒</span> Logout
+          </a>
+        </div>
+      </div>
     </div>
   </div>
 

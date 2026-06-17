@@ -1,39 +1,151 @@
-// ── Guard Portal JS ───────────────────────────────────────────────────────
+let loginMode = 'phone';
 
 window.addEventListener('DOMContentLoaded', () => {
-  if (Auth.isLoggedIn()) showApp();
+  if (Auth.isLoggedIn()) {
+    showApp();
+  }
+
+  // Handle Supabase OAuth / Magic Link redirects
+  if (typeof sb !== 'undefined') {
+    sb.auth.onAuthStateChange(async (event, session) => {
+      if (session && !Auth.isLoggedIn()) {
+        const res = await fetch(API_BASE + '/auth/verify-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            access_token: session.access_token,
+            refresh_token: session.refresh_token
+          })
+        });
+        const data = await res.ok ? await res.json() : null;
+        if (res.ok && data) {
+          if (!['guard', 'super_admin'].includes(data.role)) {
+            toast('Access denied — this portal is for Security Guards only', 'error');
+            await sb.auth.signOut();
+            return;
+          }
+          Auth.save(data);
+          showApp();
+          toast('Logged in successfully!', 'success');
+        } else {
+          const err = res ? (res.ok ? { error: 'Verification failed' } : await res.json().catch(() => ({ error: 'Verification failed' }))) : { error: 'Verification failed' };
+          toast(err.error || 'Authentication failed', 'error');
+          await sb.auth.signOut();
+        }
+      }
+    });
+  }
 });
 
 function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-shell').style.display    = 'block';
   loadGuardDashboard();
+  loadGuardProfile();
   subscribeAlerts();
   subscribeVisitorQueue();
 }
 
+function toggleUserMenu() {
+  const menu = document.getElementById('user-dropdown-menu');
+  if (menu) menu.classList.toggle('show');
+}
+
+// Close dropdown when clicking outside
+window.addEventListener('click', (e) => {
+  const trigger = document.getElementById('topbar-user-trigger');
+  const menu = document.getElementById('user-dropdown-menu');
+  if (menu && menu.classList.contains('show')) {
+    if (!menu.contains(e.target) && (!trigger || !trigger.contains(e.target))) {
+      menu.classList.remove('show');
+    }
+  }
+});
+
+async function loadGuardProfile() {
+  try {
+    const res = await apiFetch('/auth/me');
+    if (!res.ok) return;
+    const profile = await res.json();
+    
+    const name = profile.full_name || 'Guard';
+    const gate = profile.gate_id || 'GATE-A';
+    
+    const nameEl = document.getElementById('guard-name-display');
+    if (nameEl) nameEl.textContent = name;
+    
+    const gateEl = document.getElementById('gate-name-display');
+    if (gateEl) gateEl.textContent = gate;
+    
+    const avatarEl = document.getElementById('guard-profile-avatar');
+    if (avatarEl && name) {
+      avatarEl.textContent = name.charAt(0).toUpperCase();
+    }
+    
+    const dropdownNameEl = document.getElementById('dropdown-guard-name');
+    if (dropdownNameEl) dropdownNameEl.textContent = name;
+    
+    const dropdownGateEl = document.getElementById('dropdown-guard-gate');
+    if (dropdownGateEl) dropdownGateEl.textContent = `Security Guard · ${gate}`;
+  } catch (err) {
+    console.error('Failed to load guard profile:', err);
+  }
+}
+
 function resetLogin() {
   document.getElementById('step-phone').style.display = 'block';
+  document.getElementById('step-email').style.display = 'none';
   document.getElementById('step-otp').style.display   = 'none';
+  switchLoginTab('phone');
+}
+
+function switchLoginTab(tab) {
+  const phoneBtn = document.getElementById('btn-phone-tab');
+  const emailBtn = document.getElementById('btn-email-tab');
+  const phoneForm = document.getElementById('step-phone');
+  const emailForm = document.getElementById('step-email');
+  const otpForm = document.getElementById('step-otp');
+
+  otpForm.style.display = 'none';
+
+  if (tab === 'phone') {
+    phoneForm.style.display = 'block';
+    emailForm.style.display = 'none';
+    phoneBtn.className = 'btn btn-primary';
+    emailBtn.className = 'btn btn-ghost';
+  } else {
+    phoneForm.style.display = 'none';
+    emailForm.style.display = 'block';
+    emailBtn.className = 'btn btn-primary';
+    phoneBtn.className = 'btn btn-ghost';
+  }
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────
 async function sendOtp() {
+  loginMode = 'phone';
   const phone = document.getElementById('inp-phone').value.trim();
   if (!phone) return toast('Enter phone', 'error');
   const res = await fetch(API_BASE + '/auth/send-otp', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ phone }),
   });
+  const data = await res.json().catch(() => ({}));
   if (res.ok) {
     document.getElementById('step-phone').style.display = 'none';
     document.getElementById('step-otp').style.display   = 'block';
     document.getElementById('otp-phone-display').textContent = phone;
-    toast('OTP sent!', 'success');
-  } else toast('Failed to send OTP', 'error');
+    toast(data.message || 'OTP sent!', 'success');
+  } else {
+    const errorMsg = data.detail ? `${data.error || 'Failed to send OTP'}: ${data.detail}` : (data.error || 'Failed to send OTP');
+    toast(errorMsg, 'error');
+  }
 }
 
 async function verifyOtp() {
+  if (loginMode === 'email') {
+    return verifyEmailOtp();
+  }
   const phone = document.getElementById('inp-phone').value.trim();
   const token = document.getElementById('inp-otp').value.trim();
   const res = await fetch(API_BASE + '/auth/verify-otp', {
@@ -48,6 +160,72 @@ async function verifyOtp() {
     Auth.save(data);
     showApp();
   } else toast(data.error || 'Invalid OTP', 'error');
+}
+
+async function sendEmailOtp() {
+  loginMode = 'email';
+  const email = document.getElementById('inp-email').value.trim();
+  if (!email) return toast('Enter email address', 'error');
+  toast('Sending OTP to email...', 'info');
+  const res = await fetch(API_BASE + '/auth/magic-link', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email })
+  });
+  const data = await res.json();
+  if (res.ok) {
+    document.getElementById('step-email').style.display = 'none';
+    document.getElementById('step-otp').style.display   = 'block';
+    document.getElementById('otp-phone-display').textContent = email;
+    toast(data.message || 'Check your email for the OTP code!', 'success');
+  } else {
+    const errorMsg = data.detail ? `${data.error || 'Failed to send email OTP'}: ${data.detail}` : (data.error || 'Failed to send email OTP');
+    toast(errorMsg, 'error');
+  }
+}
+
+async function verifyEmailOtp() {
+  const email = document.getElementById('inp-email').value.trim();
+  const token = document.getElementById('inp-otp').value.trim();
+  const res = await fetch(API_BASE + '/auth/verify-email-otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, token }),
+  });
+  const data = await res.json();
+  if (res.ok) {
+    if (!['guard', 'super_admin'].includes(data.role)) {
+      return toast('Access denied — this portal is for Security Guards only', 'error');
+    }
+    Auth.save(data);
+    showApp();
+  } else {
+    toast(data.error || 'Invalid OTP', 'error');
+  }
+}
+
+async function loginWithGoogle() {
+  if (typeof sb === 'undefined') return toast('Supabase client not loaded', 'error');
+  try {
+    toast('Redirecting to Google...', 'info');
+    const { error } = await sb.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin + '/guard/'
+      }
+    });
+    if (error) throw error;
+  } catch (err) {
+    toast(err.message || 'Google OAuth failed', 'error');
+  }
+}
+
+async function logout() {
+  Auth.clear();
+  if (typeof sb !== 'undefined') {
+    await sb.auth.signOut();
+  }
+  window.location.reload();
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────
@@ -402,14 +580,14 @@ async function logDelivery() {
 }
 
 async function loadGateDeliveriesHome() {
-  const res = await apiFetch('/delivery/?status=left_at_gate');
+  const res = await apiFetch('/delivery/?status=arrived,left_at_gate');
   if (!res.ok) return;
   const data = await res.json();
   
   console.log('Gate deliveries:', data); // Debug log
   
-  // Show all left_at_gate deliveries
-  const waiting = data.filter(d => d.status === 'left_at_gate');
+  // Show all arrived and left_at_gate deliveries
+  const waiting = data.filter(d => ['arrived', 'left_at_gate'].includes(d.status));
   
   const html = waiting.length
     ? waiting.map(d => {
@@ -421,21 +599,30 @@ async function loadGateDeliveriesHome() {
           : '<div style="font-size:.8rem;color:var(--warning);margin-top:4px">⚠ No collection code yet</div>';
         
         return `
-          <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)">
-            <div style="flex:1">
-              <div style="font-weight:700;font-size:1rem">${d.delivery_platforms?.name || 'Delivery'}</div>
-              <div style="font-size:.85rem;color:var(--text);margin-top:2px">
-                📍 Flat ${d.flats?.flat_number || '?'}
+          <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+              <div style="flex:1">
+                <div style="font-weight:700;font-size:1rem;display:flex;align-items:center;gap:8px">
+                  ${d.delivery_platforms?.name || 'Delivery'}
+                  ${statusBadge(d.status)}
+                </div>
+                <div style="font-size:.85rem;color:var(--text);margin-top:2px">
+                  📍 Flat ${d.flats?.flat_number || '?'}
+                </div>
+                <div style="font-size:.8rem;color:var(--muted);margin-top:2px">
+                  ${d.tracking_id ? '🔖 Tracking: ' + d.tracking_id : 'No tracking ID'}
+                </div>
+                <div style="font-size:.75rem;color:var(--muted);margin-top:2px">
+                  ⏱ ${d.status === 'left_at_gate' ? 'Received at gate: ' + timeAgo(d.exit_time || d.entry_time) : 'Logged: ' + timeAgo(d.entry_time)}
+                </div>
+                ${codeHtml}
               </div>
-              <div style="font-size:.8rem;color:var(--muted);margin-top:2px">
-                ${d.tracking_id ? '🔖 Tracking: ' + d.tracking_id : 'No tracking ID'}
-              </div>
-              <div style="font-size:.75rem;color:var(--muted);margin-top:2px">
-                ⏱ Left at gate: ${timeAgo(d.exit_time || d.entry_time)}
-              </div>
-              ${codeHtml}
             </div>
-            <button class="btn btn-success" style="padding:5px 12px;font-size:.8rem" onclick="markDeliveryPicked('${d.id}')">Picked</button>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">
+              <button class="btn ${d.status === 'arrived' ? 'btn-warning' : 'btn-ghost'}" style="padding:5px 10px;font-size:.75rem;flex:1;min-width:110px" onclick="updateDeliveryStatus('${d.id}', 'arrived')">⏳ Pending</button>
+              <button class="btn ${d.status === 'left_at_gate' ? 'btn-primary' : 'btn-ghost'}" style="padding:5px 10px;font-size:.75rem;flex:1;min-width:150px" onclick="updateDeliveryStatus('${d.id}', 'left_at_gate')">📦 Received at Gate</button>
+              <button class="btn btn-ghost" style="padding:5px 10px;font-size:.75rem;flex:1;min-width:150px;color:var(--success);border-color:var(--success)" onclick="updateDeliveryStatus('${d.id}', 'collected')">✅ Collected</button>
+            </div>
           </div>
         `;
       }).join('')
@@ -444,14 +631,23 @@ async function loadGateDeliveriesHome() {
   document.getElementById('gate-deliveries-home').innerHTML = html;
 }
 
-async function markDeliveryPicked(deliveryId) {
-  const res = await apiFetch(`/delivery/${deliveryId}/mark-collected`, { method: 'POST' });
+async function updateDeliveryStatus(deliveryId, newStatus) {
+  const res = await apiFetch(`/delivery/${deliveryId}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: newStatus })
+  });
   if (res.ok) {
-    toast('Delivery marked as picked up ✓', 'success');
+    const labels = {
+      arrived: 'pending',
+      left_at_gate: 'received at gate',
+      collected: 'collected'
+    };
+    const statusLabel = labels[newStatus] || newStatus;
+    toast(`Delivery status updated to: ${statusLabel} ✓`, 'success');
     loadGateDeliveriesHome();
   } else {
     const err = await res.json();
-    toast(err.error || 'Failed to mark as picked', 'error');
+    toast(err.error || 'Failed to update status', 'error');
   }
 }
 
