@@ -602,7 +602,7 @@ async function loadGateDeliveriesHome() {
           <div style="padding:12px 0;border-bottom:1px solid var(--border)">
             <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
               <div style="flex:1">
-                <div style="font-weight:700;font-size:1rem;display:flex;align-items:center;gap:8px">
+                <div style="font-weight:700;font-size:1rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                   ${d.delivery_platforms?.name || 'Delivery'}
                   ${statusBadge(d.status)}
                 </div>
@@ -617,11 +617,11 @@ async function loadGateDeliveriesHome() {
                 </div>
                 ${codeHtml}
               </div>
-            </div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">
-              <button class="btn ${d.status === 'arrived' ? 'btn-warning' : 'btn-ghost'}" style="padding:5px 10px;font-size:.75rem;flex:1;min-width:110px" onclick="updateDeliveryStatus('${d.id}', 'arrived')">⏳ Pending</button>
-              <button class="btn ${d.status === 'left_at_gate' ? 'btn-primary' : 'btn-ghost'}" style="padding:5px 10px;font-size:.75rem;flex:1;min-width:150px" onclick="updateDeliveryStatus('${d.id}', 'left_at_gate')">📦 Received at Gate</button>
-              <button class="btn btn-ghost" style="padding:5px 10px;font-size:.75rem;flex:1;min-width:150px;color:var(--success);border-color:var(--success)" onclick="updateDeliveryStatus('${d.id}', 'collected')">✅ Collected</button>
+              <div class="delivery-status-container">
+                <button class="delivery-status-btn btn-accept ${d.status === 'collected' ? 'active' : ''}" onclick="updateDeliveryStatus('${d.id}', 'collected')">✓ Collected</button>
+                <button class="delivery-status-btn btn-leave ${d.status === 'left_at_gate' ? 'active' : ''}" onclick="updateDeliveryStatus('${d.id}', 'left_at_gate')">📍 Left at Gate</button>
+                <button class="delivery-status-btn btn-reject ${d.status === 'arrived' ? 'active' : ''}" onclick="updateDeliveryStatus('${d.id}', 'arrived')">✗ Pending</button>
+              </div>
             </div>
           </div>
         `;

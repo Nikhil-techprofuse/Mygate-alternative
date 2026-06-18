@@ -103,6 +103,9 @@
     <!-- Dashboard -->
     <div id="page-dashboard" class="page active" style="padding:16px">
 
+      <!-- Active Emergency Broadcasts -->
+      <div id="active-emergency-broadcasts" style="margin-bottom:16px"></div>
+
       <!-- SOS -->
       <div style="text-align:center;margin:16px 0">
         <button class="sos-btn" onclick="triggerSOS()">SOS</button>
@@ -316,6 +319,24 @@
     <div style="display:flex;gap:8px">
       <button class="btn btn-warning btn-full" onclick="confirmLeaveAtGate()">Confirm & Leave at Gate</button>
       <button class="btn btn-ghost btn-full" onclick="closeModal('modal-delivery-otp')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-add-post" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-add-post')">
+  <div class="modal-box">
+    <div class="modal-title">Create Community Post</div>
+    <div class="form-group">
+      <label>Post Title *</label>
+      <input id="post-title" class="form-control" type="text" placeholder="What's on your mind?">
+    </div>
+    <div class="form-group">
+      <label>Post Description / Body</label>
+      <textarea id="post-body" class="form-control" rows="4" placeholder="Share more details..."></textarea>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary btn-full" onclick="createCommunityPost()">Publish Post</button>
+      <button class="btn btn-ghost btn-full" onclick="closeModal('modal-add-post')">Cancel</button>
     </div>
   </div>
 </div>

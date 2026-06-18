@@ -27,6 +27,7 @@ function showFlatSelection() {
       loadDashboard();
       subscribeVisitorApprovals();
       subscribeDeliveryUpdates();
+      subscribeBroadcasts();
       return;
     }
 
@@ -127,6 +128,7 @@ async function confirmFlatSelection() {
   loadDashboard();
   subscribeVisitorApprovals();
   subscribeDeliveryUpdates();
+  subscribeBroadcasts();
 }
 
 function showApp() {
@@ -194,16 +196,18 @@ function getFlatId() {
 }
 
 async function loadDashboard() {
-  const [profRes, visRes, delRes, flatNameRes] = await Promise.all([
+  const [profRes, visRes, delRes, flatNameRes, broadcastsRes] = await Promise.all([
     apiFetch('/auth/me'),
     apiFetch('/visitors/?limit=5'),
-    apiFetch('/delivery/?status=arrived'),
+    apiFetch('/delivery/?status=arrived,left_at_gate'),
     apiFetch('/auth/flat-resident'),
+    apiFetch('/security-alerts/broadcasts'),
   ]);
   _myProfile   = profRes.ok  ? await profRes.json()  : {};
   const visitors   = visRes.ok   ? await visRes.json()   : [];
   const deliveries = delRes.ok ? await delRes.json()   : [];
   const flatName   = flatNameRes.ok ? await flatNameRes.json() : {};
+  const broadcasts = broadcastsRes.ok ? await broadcastsRes.json() : [];
 
   if (_myProfile.flat_id) {
     localStorage.setItem((window.MG_PORTAL || 'mg') + '_flat_id', _myProfile.flat_id);
@@ -239,6 +243,9 @@ async function loadDashboard() {
   const pendingDeliveries = deliveries.filter(d => d.status === 'arrived');
   const gateDeliveries = deliveries.filter(d => d.status === 'left_at_gate' && !d.parcel_otp_used);
   
+  // Render active emergency broadcasts
+  renderEmergencyBroadcasts(broadcasts);
+
   // Stats cards removed per user request
 
   const pending = visitors.filter(v => v.approval_status === 'pending');
@@ -650,20 +657,38 @@ async function confirmSOS() {
 
 // ── Community ─────────────────────────────────────────────────────────────
 async function loadNotices() {
-  const res = await apiFetch('/community/notices');
-  const data = res.ok ? await res.json() : [];
-  document.getElementById('community-content').innerHTML = data.length
-    ? data.map(n => `
-      <div class="card" style="margin-bottom:12px">
-        <div style="display:flex;justify-content:space-between">
-          <strong>${n.title}</strong>
-          ${n.is_pinned ? '<span class="badge badge-info">📌 Pinned</span>' : ''}
-        </div>
-        <p style="margin-top:8px;color:var(--muted);font-size:.875rem">${n.body || ''}</p>
-        <div style="margin-top:10px;font-size:.8rem;color:var(--muted)">${fmtDate(n.created_at)}</div>
-        <button class="btn btn-ghost" style="margin-top:8px;padding:4px 12px;font-size:.8rem" onclick="ackNotice('${n.id}')">✓ Acknowledge</button>
-      </div>`).join('')
-    : '<p style="color:var(--muted);text-align:center;padding:20px">No notices</p>';
+  const [noticesRes, broadcastsRes] = await Promise.all([
+    apiFetch('/community/notices'),
+    apiFetch('/security-alerts/broadcasts')
+  ]);
+  const notices = noticesRes.ok ? await noticesRes.json() : [];
+  const broadcasts = broadcastsRes.ok ? await broadcastsRes.json() : [];
+
+  const broadcastHtml = broadcasts.map(b => `
+    <div class="card" style="margin-bottom:12px;border:2px solid var(--danger);background:var(--card-bg)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong style="color:var(--danger);font-size:1.05rem">🚨 EMERGENCY: ${b.title}</strong>
+        <span class="badge badge-danger" style="background:var(--danger);color:#fff">Emergency</span>
+      </div>
+      <p style="margin-top:8px;font-weight:600;font-size:.9rem;color:var(--text)">${b.message}</p>
+      <div style="margin-top:10px;font-size:.8rem;color:var(--muted)">${fmtDate(b.sent_at)}</div>
+    </div>
+  `).join('');
+
+  const noticesHtml = notices.map(n => `
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between">
+        <strong>${n.title}</strong>
+        ${n.is_pinned ? '<span class="badge badge-info">📌 Pinned</span>' : ''}
+      </div>
+      <p style="margin-top:8px;color:var(--muted);font-size:.875rem">${n.body || ''}</p>
+      <div style="margin-top:10px;font-size:.8rem;color:var(--muted)">${fmtDate(n.created_at)}</div>
+      <button class="btn btn-ghost" style="margin-top:8px;padding:4px 12px;font-size:.8rem" onclick="ackNotice('${n.id}')">✓ Acknowledge</button>
+    </div>
+  `).join('');
+
+  const combinedHtml = broadcastHtml + (noticesHtml || '<p style="color:var(--muted);text-align:center;padding:20px">No notices</p>');
+  document.getElementById('community-content').innerHTML = (broadcastHtml || noticesHtml) ? combinedHtml : '<p style="color:var(--muted);text-align:center;padding:20px">No updates available</p>';
 }
 
 async function ackNotice(id) {
@@ -712,14 +737,47 @@ async function rsvpEvent(id, status) {
 async function loadForum() {
   const res = await apiFetch('/community/forum');
   const data = res.ok ? await res.json() : [];
-  document.getElementById('community-content').innerHTML = data.length
+  
+  const headerHtml = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 style="font-size:1.1rem;font-weight:700">Community Forum</h3>
+      <button class="btn btn-primary" style="padding:6px 12px;font-size:0.85rem" onclick="openModal('modal-add-post')">✍️ Create Post</button>
+    </div>
+  `;
+  
+  const postsHtml = data.length
     ? data.map(t => `
       <div class="card" style="margin-bottom:12px">
         <strong>${t.title}</strong>
         <div style="font-size:.8rem;color:var(--muted);margin-top:4px">by ${t.user_profiles?.full_name || 'Resident'} · ${timeAgo(t.created_at)}</div>
-        <p style="margin-top:8px;font-size:.875rem">${t.body || ''}</p>
+        <p style="margin-top:8px;font-size:.875rem;color:var(--text);white-space:pre-wrap">${t.body || ''}</p>
       </div>`).join('')
-    : '<p style="color:var(--muted);text-align:center;padding:20px">No forum threads</p>';
+    : '<p style="color:var(--muted);text-align:center;padding:20px">No posts yet. Be the first to share something!</p>';
+    
+  document.getElementById('community-content').innerHTML = headerHtml + postsHtml;
+}
+
+async function createCommunityPost() {
+  const title = document.getElementById('post-title').value.trim();
+  const body = document.getElementById('post-body').value.trim();
+  
+  if (!title) return toast('Post title is required', 'error');
+  
+  const res = await apiFetch('/community/forum', {
+    method: 'POST',
+    body: JSON.stringify({ title, body, group_type: 'general' })
+  });
+  
+  if (res.ok) {
+    closeModal('modal-add-post');
+    document.getElementById('post-title').value = '';
+    document.getElementById('post-body').value = '';
+    toast('Post published successfully!', 'success');
+    loadForum();
+  } else {
+    const err = await res.json();
+    toast(err.error || 'Failed to publish post', 'error');
+  }
 }
 
 // ── Profile ───────────────────────────────────────────────────────────────
@@ -850,3 +908,60 @@ window.addEventListener('click', (e) => {
     }
   }
 });
+
+// ── Emergency Broadcast Subscriptions and Rendering ───────────────────────
+function subscribeBroadcasts() {
+  const societyId = Auth.societyId;
+  if (!societyId) return;
+  sb.channel('emergency-broadcasts')
+    .on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'admin_broadcasts',
+      filter: `society_id=eq.${societyId}`,
+    }, payload => {
+      const b = payload.new;
+      toast(`🚨 EMERGENCY: ${b.title} - ${b.message}`, 'error');
+      loadDashboard();
+      const pageComm = document.getElementById('page-community');
+      if (pageComm && pageComm.classList.contains('active')) {
+        loadNotices();
+      }
+    })
+    .subscribe();
+}
+
+function renderEmergencyBroadcasts(broadcasts) {
+  const container = document.getElementById('active-emergency-broadcasts');
+  if (!container) return;
+  
+  if (!broadcasts || !broadcasts.length) {
+    container.innerHTML = '';
+    return;
+  }
+  
+  const now = new Date();
+  // Only show emergency broadcasts from the last 24 hours on the dashboard
+  const activeBroadcasts = broadcasts.filter(b => {
+    const sentTime = new Date(b.sent_at);
+    const diffHours = (now - sentTime) / (1000 * 60 * 60);
+    return diffHours <= 24;
+  });
+  
+  if (!activeBroadcasts.length) {
+    container.innerHTML = '';
+    return;
+  }
+  
+  container.innerHTML = activeBroadcasts.map(b => `
+    <div class="alert-banner" style="background:var(--danger);color:#fff;padding:12px 16px;border-radius:12px;font-weight:600;display:flex;flex-direction:column;gap:4px;box-shadow:0 4px 12px rgba(234,67,53,0.25);margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:0.95rem">
+        <span style="font-size:1.2rem;animation:alertPulse 1.5s infinite;display:inline-block">🚨</span>
+        <span>EMERGENCY ALERT: ${b.title}</span>
+      </div>
+      <div style="font-size:0.85rem;font-weight:400;opacity:0.95;margin-top:2px">${b.message}</div>
+      <div style="font-size:0.75rem;opacity:0.8;font-weight:400;margin-top:4px">${timeAgo(b.sent_at)}</div>
+    </div>
+  `).join('');
+}
+

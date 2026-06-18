@@ -325,24 +325,27 @@
       </div>
 
       <!-- Community -->
+      <!-- Community -->
       <div id="page-community" class="page">
-        <h2 class="page-title">Community</h2>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-          <div class="card">
-            <div class="card-header">Post Notice</div>
-            <div class="form-group"><input id="notice-title" class="form-control" type="text" placeholder="Notice title"></div>
-            <div class="form-group"><textarea id="notice-body" class="form-control" rows="3" placeholder="Notice content"></textarea></div>
-            <div class="form-group" style="display:flex;align-items:center;gap:8px">
-              <input type="checkbox" id="notice-pinned"><label>Pin to top</label>
-            </div>
-            <button class="btn btn-primary btn-full" onclick="postNotice()">Post Notice</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px">
+          <h2 class="page-title" style="margin-bottom:0">Community Dashboard</h2>
+          <div id="community-action-btn-container">
+            <!-- Buttons dynamically inserted based on active tab -->
           </div>
-          <div class="card">
-            <div class="card-header">Emergency Broadcast</div>
-            <div class="form-group"><input id="broadcast-title" class="form-control" type="text" placeholder="Alert title"></div>
-            <div class="form-group"><textarea id="broadcast-msg" class="form-control" rows="3" placeholder="Message (fire alert, water cut, etc.)"></textarea></div>
-            <button class="btn btn-danger btn-full" onclick="sendBroadcast()">🚨 Send Broadcast</button>
-          </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="tab-container">
+          <button class="tab-btn active" data-tab="notices" onclick="switchCommunityTab('notices')">🏘️ Notices</button>
+          <button class="tab-btn" data-tab="broadcasts" onclick="switchCommunityTab('broadcasts')">🚨 Broadcasts</button>
+          <button class="tab-btn" data-tab="forum" onclick="switchCommunityTab('forum')">💬 Forum</button>
+          <button class="tab-btn" data-tab="events" onclick="switchCommunityTab('events')">📅 Events</button>
+          <button class="tab-btn" data-tab="polls" onclick="switchCommunityTab('polls')">📊 Polls</button>
+        </div>
+
+        <!-- Tab Contents -->
+        <div id="community-tab-content">
+          <!-- Dynamically populated list of items -->
         </div>
       </div>
 
@@ -529,6 +532,115 @@
       <button class="btn btn-primary btn-full" onclick="addFamilyFromModal()">+ Add Member</button>
     </div>
     <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="closeFamilyModal()">Close</button>
+  </div>
+</div>
+
+<!-- ── Add Notice Modal ────────────────────────────────────────────── -->
+<div id="modal-add-notice" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-add-notice')">
+  <div class="modal-box">
+    <div class="modal-title">Post Notice</div>
+    <div class="form-group">
+      <label>Notice Title *</label>
+      <input id="notice-title" class="form-control" type="text" placeholder="Enter notice title">
+    </div>
+    <div class="form-group">
+      <label>Content / Description *</label>
+      <textarea id="notice-body" class="form-control" rows="4" placeholder="Enter notice details"></textarea>
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="notice-pinned">
+      <label for="notice-pinned" style="margin-bottom:0">Pin to top</label>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="adminPostNotice()">Post Notice</button>
+  </div>
+</div>
+
+<!-- ── Send Broadcast Modal ────────────────────────────────────────── -->
+<div id="modal-add-broadcast" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-add-broadcast')">
+  <div class="modal-box">
+    <div class="modal-title" style="color:var(--danger)">🚨 Send Emergency Broadcast</div>
+    <div class="form-group">
+      <label>Broadcast Title *</label>
+      <input id="broadcast-title" class="form-control" type="text" placeholder="e.g. Water Cutoff, Fire Alert">
+    </div>
+    <div class="form-group">
+      <label>Message *</label>
+      <textarea id="broadcast-msg" class="form-control" rows="4" placeholder="Enter urgent message to all residents"></textarea>
+    </div>
+    <button class="btn btn-danger btn-full" onclick="adminSendBroadcast()">🚨 Send Broadcast</button>
+  </div>
+</div>
+
+<!-- ── Create Forum Post Modal ─────────────────────────────────────── -->
+<div id="modal-add-forum-post" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-add-forum-post')">
+  <div class="modal-box">
+    <div class="modal-title">Create Forum Post</div>
+    <div class="form-group">
+      <label>Post Title *</label>
+      <input id="forum-title" class="form-control" type="text" placeholder="What is this discussion about?">
+    </div>
+    <div class="form-group">
+      <label>Body / Description</label>
+      <textarea id="forum-body" class="form-control" rows="4" placeholder="Share more details with residents"></textarea>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="adminCreateForumPost()">Publish Post</button>
+  </div>
+</div>
+
+<!-- ── Add Event Modal ─────────────────────────────────────────────── -->
+<div id="modal-add-event" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-add-event')">
+  <div class="modal-box">
+    <div class="modal-title">Add Event</div>
+    <div class="form-group">
+      <label>Event Title *</label>
+      <input id="event-title" class="form-control" type="text" placeholder="e.g. Diwali Celebration, Annual Meeting">
+    </div>
+    <div class="form-group">
+      <label>Description</label>
+      <textarea id="event-desc" class="form-control" rows="3" placeholder="Describe the event details"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Venue / Location</label>
+      <input id="event-venue" class="form-control" type="text" placeholder="e.g. Community Hall, Central Park">
+    </div>
+    <div class="form-group">
+      <label>Event Date & Time *</label>
+      <input id="event-date" class="form-control" type="datetime-local">
+    </div>
+    <button class="btn btn-primary btn-full" onclick="adminAddEvent()">Add Event</button>
+  </div>
+</div>
+
+<!-- ── Create Poll Modal ───────────────────────────────────────────── -->
+<div id="modal-add-poll" class="modal-overlay" onclick="if(event.target===this)closeModal('modal-add-poll')">
+  <div class="modal-box">
+    <div class="modal-title">Create Poll</div>
+    <div class="form-group">
+      <label>Question *</label>
+      <input id="poll-question" class="form-control" type="text" placeholder="What would you like to ask?">
+    </div>
+    
+    <div class="form-group">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <label style="margin-bottom:0">Options *</label>
+        <button class="btn btn-ghost" style="padding:2px 8px;font-size:0.8rem" onclick="addPollOptionRow()">+ Add Option</button>
+      </div>
+      <div id="poll-options-container" style="display:flex;flex-direction:column;gap:8px">
+        <!-- Rendered option rows dynamically -->
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Ends At</label>
+      <input id="poll-ends-at" class="form-control" type="datetime-local">
+    </div>
+
+    <div class="form-group" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="poll-is-secret">
+      <label for="poll-is-secret" style="margin-bottom:0">Secret Poll (Hide voter identities)</label>
+    </div>
+
+    <button class="btn btn-primary btn-full" onclick="adminCreatePoll()">Create Poll</button>
   </div>
 </div>
 

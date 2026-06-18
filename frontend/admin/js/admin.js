@@ -21,6 +21,7 @@ function nav(pageId) {
     'page-amenities': loadAmenities,
     'page-alerts':    loadAlerts,
     'page-society':   loadSocietySetup,
+    'page-community': loadCommunityData,
   };
   if (loaders[pageId]) loaders[pageId]();
 }
@@ -989,19 +990,287 @@ async function addAmenity() {
 }
 
 // ── Community ─────────────────────────────────────────────────────────────
-async function postNotice() {
+let currentCommunityTab = 'notices';
+let pollOptionsCount = 0;
+
+async function loadCommunityData(activeTab = 'notices') {
+  currentCommunityTab = activeTab;
+  
+  // Set active class on tab buttons
+  document.querySelectorAll('#page-community .tab-btn').forEach(btn => {
+    if (btn.getAttribute('data-tab') === activeTab) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+
+  // Render correct action button in container
+  const btnContainer = document.getElementById('community-action-btn-container');
+  if (!btnContainer) return;
+
+  if (activeTab === 'notices') {
+    btnContainer.innerHTML = `<button class="btn btn-primary" onclick="openModal('modal-add-notice')">+ Post Notice</button>`;
+    await loadCommunityNotices();
+  } else if (activeTab === 'broadcasts') {
+    btnContainer.innerHTML = `<button class="btn btn-danger" onclick="openModal('modal-add-broadcast')">🚨 Send Broadcast</button>`;
+    await loadCommunityBroadcasts();
+  } else if (activeTab === 'forum') {
+    btnContainer.innerHTML = `<button class="btn btn-primary" onclick="openModal('modal-add-forum-post')">💬 Create Post</button>`;
+    await loadCommunityPosts();
+  } else if (activeTab === 'events') {
+    btnContainer.innerHTML = `<button class="btn btn-primary" onclick="openModal('modal-add-event')">📅 Add Event</button>`;
+    await loadCommunityEvents();
+  } else if (activeTab === 'polls') {
+    btnContainer.innerHTML = `<button class="btn btn-primary" onclick="openAddPollModal()">📊 Create Poll</button>`;
+    await loadCommunityPolls();
+  }
+}
+
+function switchCommunityTab(tab) {
+  loadCommunityData(tab);
+}
+
+// ── Retrieve Community Data ──
+
+async function loadCommunityNotices() {
+  const contentEl = document.getElementById('community-tab-content');
+  if (!contentEl) return;
+  contentEl.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">Loading notices...</p>';
+
+  const res = await apiFetch('/community/notices');
+  const data = res.ok ? await res.json() : [];
+  contentEl.innerHTML = data.length
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">
+        ${data.map(n => `
+          <div class="card" style="position:relative; border-top: 4px solid ${n.is_pinned ? 'var(--warning)' : 'var(--primary)'}">
+            ${n.is_pinned ? `<span class="badge badge-warning" style="position:absolute;top:12px;right:12px">Pinned</span>` : ''}
+            <h3 style="font-size:1.1rem;font-weight:600;margin-bottom:8px;padding-right:60px;color:var(--text)">${n.title}</h3>
+            <div style="font-size:0.8rem;color:var(--muted);margin-bottom:12px">
+              By ${n.user_profiles?.full_name || 'Admin'} · ${fmtDate(n.created_at)}
+            </div>
+            <p style="font-size:0.9rem;white-space:pre-wrap;color:var(--text)">${n.body || ''}</p>
+          </div>
+        `).join('')}
+       </div>`
+    : '<p style="color:var(--muted);text-align:center;padding:40px">No notices posted yet.</p>';
+}
+
+async function loadCommunityBroadcasts() {
+  const contentEl = document.getElementById('community-tab-content');
+  if (!contentEl) return;
+  contentEl.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">Loading broadcasts...</p>';
+
+  const res = await apiFetch('/security-alerts/broadcasts');
+  const data = res.ok ? await res.json() : [];
+  contentEl.innerHTML = data.length
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">
+        ${data.map(b => `
+          <div class="card" style="border-left:4px solid var(--danger)">
+            <h3 style="font-size:1.1rem;font-weight:600;color:var(--danger);margin-bottom:8px">${b.title}</h3>
+            <div style="font-size:0.8rem;color:var(--muted);margin-bottom:12px">
+              Sent at: ${fmtDate(b.sent_at)}
+            </div>
+            <p style="font-size:0.9rem;white-space:pre-wrap;color:var(--text)">${b.message || ''}</p>
+          </div>
+        `).join('')}
+       </div>`
+    : '<p style="color:var(--muted);text-align:center;padding:40px">No emergency broadcasts sent yet.</p>';
+}
+
+async function loadCommunityPosts() {
+  const contentEl = document.getElementById('community-tab-content');
+  if (!contentEl) return;
+  contentEl.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">Loading forum posts...</p>';
+
+  const res = await apiFetch('/community/forum');
+  const data = res.ok ? await res.json() : [];
+  contentEl.innerHTML = data.length
+    ? `<div style="display:flex;flex-direction:column;gap:16px">
+        ${data.map(t => `
+          <div class="card" id="thread-card-${t.id}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+              <div>
+                <h3 style="font-size:1.1rem;font-weight:600;margin-bottom:4px;color:var(--text)">${t.title}</h3>
+                <div style="font-size:0.8rem;color:var(--muted)">
+                  by ${t.user_profiles?.full_name || 'Resident'} · ${fmtDate(t.created_at)}
+                </div>
+              </div>
+              <span class="badge badge-info" style="text-transform:capitalize">${t.group_type || 'general'}</span>
+            </div>
+            <p style="margin-top:12px;font-size:0.95rem;white-space:pre-wrap;color:var(--text)">${t.body || ''}</p>
+            
+            <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;display:flex;gap:12px">
+              <button class="btn btn-ghost" style="padding:6px 12px;font-size:0.8rem" onclick="toggleReplies('${t.id}')">
+                💬 Comments / Replies
+              </button>
+            </div>
+            
+            <div id="replies-area-${t.id}" style="display:none;margin-top:16px;background:var(--surface);padding:12px;border-radius:8px">
+              <div id="replies-list-${t.id}" style="display:flex;flex-direction:column;gap:10px;margin-bottom:12px">
+                <p style="font-size:0.85rem;color:var(--muted)">Loading replies...</p>
+              </div>
+              <div style="display:flex;gap:8px">
+                <input id="reply-input-${t.id}" class="form-control" style="font-size:0.85rem;padding:6px 10px" placeholder="Write a reply...">
+                <button class="btn btn-primary" style="padding:6px 16px;font-size:0.85rem" onclick="submitReply('${t.id}')">Reply</button>
+              </div>
+            </div>
+          </div>
+        `).join('')}
+       </div>`
+    : '<p style="color:var(--muted);text-align:center;padding:40px">No forum posts yet.</p>';
+}
+
+async function toggleReplies(threadId) {
+  const area = document.getElementById(`replies-area-${threadId}`);
+  if (!area) return;
+  if (area.style.display === 'none') {
+    area.style.display = 'block';
+    await loadReplies(threadId);
+  } else {
+    area.style.display = 'none';
+  }
+}
+
+async function loadReplies(threadId) {
+  const listEl = document.getElementById(`replies-list-${threadId}`);
+  if (!listEl) return;
+  const res = await apiFetch(`/community/forum/${threadId}/replies`);
+  const replies = res.ok ? await res.json() : [];
+  listEl.innerHTML = replies.length
+    ? replies.map(r => `
+      <div style="border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--muted);margin-bottom:4px">
+          <strong>${r.user_profiles?.full_name || 'User'}</strong>
+          <span>${fmtDate(r.created_at)}</span>
+        </div>
+        <p style="font-size:0.85rem;color:var(--text);white-space:pre-wrap">${r.body}</p>
+      </div>
+    `).join('')
+    : '<p style="font-size:0.85rem;color:var(--muted);padding:8px 0">No replies yet.</p>';
+}
+
+async function submitReply(threadId) {
+  const input = document.getElementById(`reply-input-${threadId}`);
+  if (!input) return;
+  const body = input.value.trim();
+  if (!body) return toast('Reply content cannot be empty', 'error');
+  
+  const res = await apiFetch(`/community/forum/${threadId}/replies`, {
+    method: 'POST',
+    body: JSON.stringify({ body })
+  });
+  if (res.ok) {
+    input.value = '';
+    toast('Reply added!', 'success');
+    await loadReplies(threadId);
+  } else {
+    toast('Failed to add reply', 'error');
+  }
+}
+
+async function loadCommunityEvents() {
+  const contentEl = document.getElementById('community-tab-content');
+  if (!contentEl) return;
+  contentEl.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">Loading events...</p>';
+
+  const res = await apiFetch('/community/events');
+  const data = res.ok ? await res.json() : [];
+  contentEl.innerHTML = data.length
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">
+        ${data.map(e => `
+          <div class="card" style="border-left:4px solid var(--primary)">
+            <h3 style="font-size:1.1rem;font-weight:600;margin-bottom:8px;color:var(--text)">${e.title}</h3>
+            <div style="font-size:0.85rem;color:var(--muted);margin-bottom:8px;display:flex;flex-direction:column;gap:4px">
+              <span>📍 <strong>Venue:</strong> ${e.venue || 'TBD'}</span>
+              <span>📅 <strong>Date:</strong> ${fmtDate(e.event_date)}</span>
+            </div>
+            <p style="font-size:0.9rem;color:var(--text);white-space:pre-wrap;margin-top:12px">${e.description || 'No description provided.'}</p>
+          </div>
+        `).join('')}
+       </div>`
+    : '<p style="color:var(--muted);text-align:center;padding:40px">No upcoming events scheduled.</p>';
+}
+
+async function loadCommunityPolls() {
+  const contentEl = document.getElementById('community-tab-content');
+  if (!contentEl) return;
+  contentEl.innerHTML = '<p style="color:var(--muted);text-align:center;padding:20px">Loading polls...</p>';
+
+  const res = await apiFetch('/community/polls');
+  const polls = res.ok ? await res.json() : [];
+  
+  if (!polls.length) {
+    contentEl.innerHTML = '<p style="color:var(--muted);text-align:center;padding:40px">No polls created yet.</p>';
+    return;
+  }
+
+  // Fetch results for all polls in parallel to display vote counts/percentage bars
+  const pollsWithResults = await Promise.all(polls.map(async p => {
+    const resResults = await apiFetch(`/community/polls/${p.id}/results`);
+    const results = resResults.ok ? await resResults.json() : [];
+    return { ...p, results };
+  }));
+
+  contentEl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px">
+    ${pollsWithResults.map(p => {
+      const totalVotes = p.results.reduce((sum, r) => sum + (r.votes || 0), 0);
+      const endsText = p.ends_at ? `Ends: ${fmtDate(p.ends_at)}` : 'No end date';
+      
+      return `
+        <div class="card" style="border-top: 4px solid var(--success)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+            <div>
+              <h3 style="font-size:1.1rem;font-weight:600;color:var(--text)">${p.question}</h3>
+              <span style="font-size:0.75rem;color:var(--muted)">${endsText} · ${totalVotes} total votes</span>
+            </div>
+            ${p.is_secret ? '<span class="badge badge-success">Secret</span>' : ''}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+            ${p.results.map(r => {
+              const percentage = totalVotes > 0 ? Math.round((r.votes / totalVotes) * 100) : 0;
+              return `
+                <div>
+                  <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:4px">
+                    <span style="color:var(--text)">${r.option_text}</span>
+                    <span style="color:var(--muted)"><strong>${r.votes} votes</strong> (${percentage}%)</span>
+                  </div>
+                  <div style="background:var(--hover-bg);height:8px;border-radius:4px;overflow:hidden">
+                    <div style="background:var(--primary);width:${percentage}%;height:100%;border-radius:4px"></div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }).join('')}
+  </div>`;
+}
+
+// ── Publish / Create Community Items ──
+
+async function adminPostNotice() {
   const body = {
-    title:    document.getElementById('notice-title').value.trim(),
-    body:     document.getElementById('notice-body').value.trim(),
+    title:     document.getElementById('notice-title').value.trim(),
+    body:      document.getElementById('notice-body').value.trim(),
     is_pinned: document.getElementById('notice-pinned').checked,
   };
   if (!body.title) return toast('Title required', 'error');
   const res = await apiFetch('/community/notices', { method: 'POST', body: JSON.stringify(body) });
-  if (res.ok) { toast('Notice posted!', 'success'); document.getElementById('notice-title').value = ''; document.getElementById('notice-body').value = ''; }
-  else toast('Failed', 'error');
+  if (res.ok) {
+    toast('Notice posted!', 'success');
+    closeModal('modal-add-notice');
+    document.getElementById('notice-title').value = '';
+    document.getElementById('notice-body').value = '';
+    document.getElementById('notice-pinned').checked = false;
+    await loadCommunityNotices();
+  } else {
+    toast('Failed to post notice', 'error');
+  }
 }
 
-async function sendBroadcast() {
+async function adminSendBroadcast() {
   const body = {
     title:   document.getElementById('broadcast-title').value.trim(),
     message: document.getElementById('broadcast-msg').value.trim(),
@@ -1009,9 +1278,147 @@ async function sendBroadcast() {
   if (!body.title || !body.message) return toast('Title and message required', 'error');
   if (!confirm(`Send emergency broadcast: "${body.title}"?`)) return;
   const res = await apiFetch('/security-alerts/broadcast', { method: 'POST', body: JSON.stringify(body) });
-  if (res.ok) { toast('🚨 Broadcast sent!', 'success'); document.getElementById('broadcast-title').value = ''; document.getElementById('broadcast-msg').value = ''; }
-  else toast('Failed', 'error');
+  if (res.ok) {
+    toast('🚨 Broadcast sent!', 'success');
+    closeModal('modal-add-broadcast');
+    document.getElementById('broadcast-title').value = '';
+    document.getElementById('broadcast-msg').value = '';
+    await loadCommunityBroadcasts();
+  } else {
+    toast('Failed to send broadcast', 'error');
+  }
 }
+
+async function adminCreateForumPost() {
+  const body = {
+    title:      document.getElementById('forum-title').value.trim(),
+    body:       document.getElementById('forum-body').value.trim(),
+    group_type: 'general'
+  };
+  if (!body.title) return toast('Title required', 'error');
+  const res = await apiFetch('/community/forum', { method: 'POST', body: JSON.stringify(body) });
+  if (res.ok) {
+    toast('Forum post published!', 'success');
+    closeModal('modal-add-forum-post');
+    document.getElementById('forum-title').value = '';
+    document.getElementById('forum-body').value = '';
+    await loadCommunityPosts();
+  } else {
+    toast('Failed to publish forum post', 'error');
+  }
+}
+
+async function adminAddEvent() {
+  const body = {
+    title:       document.getElementById('event-title').value.trim(),
+    description: document.getElementById('event-desc').value.trim(),
+    venue:       document.getElementById('event-venue').value.trim(),
+    event_date:  document.getElementById('event-date').value
+  };
+  if (!body.title) return toast('Event title required', 'error');
+  if (!body.event_date) return toast('Event date and time required', 'error');
+  
+  const res = await apiFetch('/community/events', { method: 'POST', body: JSON.stringify(body) });
+  if (res.ok) {
+    toast('Event added!', 'success');
+    closeModal('modal-add-event');
+    document.getElementById('event-title').value = '';
+    document.getElementById('event-desc').value = '';
+    document.getElementById('event-venue').value = '';
+    document.getElementById('event-date').value = '';
+    await loadCommunityEvents();
+  } else {
+    toast('Failed to create event', 'error');
+  }
+}
+
+async function adminCreatePoll() {
+  const question = document.getElementById('poll-question').value.trim();
+  const endsAtVal = document.getElementById('poll-ends-at').value;
+  const isSecret = document.getElementById('poll-is-secret').checked;
+  
+  if (!question) return toast('Question required', 'error');
+  
+  const optionInputs = document.querySelectorAll('#poll-options-container .poll-option-input');
+  const options = [];
+  optionInputs.forEach(input => {
+    const val = input.value.trim();
+    if (val) options.push(val);
+  });
+
+  if (options.length < 2) {
+    return toast('At least 2 non-empty options are required', 'error');
+  }
+
+  const body = {
+    question,
+    options,
+    is_secret: isSecret,
+    ends_at: endsAtVal || null
+  };
+
+  const res = await apiFetch('/community/polls', { method: 'POST', body: JSON.stringify(body) });
+  if (res.ok) {
+    toast('Poll created!', 'success');
+    closeModal('modal-add-poll');
+    await loadCommunityPolls();
+  } else {
+    toast('Failed to create poll', 'error');
+  }
+}
+
+// ── Poll Option Inputs Dynamically Rendered ──
+
+function openAddPollModal() {
+  document.getElementById('poll-question').value = '';
+  document.getElementById('poll-ends-at').value = '';
+  document.getElementById('poll-is-secret').checked = false;
+  document.getElementById('poll-options-container').innerHTML = '';
+  pollOptionsCount = 0;
+  
+  // Initialize with 2 options
+  addPollOptionRow();
+  addPollOptionRow();
+  
+  openModal('modal-add-poll');
+}
+
+function addPollOptionRow() {
+  pollOptionsCount++;
+  const container = document.getElementById('poll-options-container');
+  const row = document.createElement('div');
+  row.className = 'poll-option-row';
+  row.style.display = 'flex';
+  row.style.gap = '8px';
+  row.style.alignItems = 'center';
+  row.id = `poll-opt-row-${pollOptionsCount}`;
+  row.innerHTML = `
+    <input class="form-control poll-option-input" type="text" placeholder="Option" required>
+    <button class="btn btn-ghost" style="padding: 10px; color: var(--danger); border-color: var(--border);" type="button" onclick="removePollOptionRow(${pollOptionsCount})">🗑️</button>
+  `;
+  container.appendChild(row);
+  _updateOptionPlaceholders();
+}
+
+function removePollOptionRow(rowId) {
+  const container = document.getElementById('poll-options-container');
+  if (container.children.length <= 2) {
+    return toast('Polls require at least 2 options', 'error');
+  }
+  const row = document.getElementById(`poll-opt-row-${rowId}`);
+  if (row) {
+    row.remove();
+  }
+  _updateOptionPlaceholders();
+}
+
+function _updateOptionPlaceholders() {
+  const inputs = document.querySelectorAll('#poll-options-container .poll-option-input');
+  inputs.forEach((input, index) => {
+    input.placeholder = `Option ${index + 1}`;
+  });
+}
+
 
 // ── Alerts ────────────────────────────────────────────────────────────────
 async function loadAlerts() {

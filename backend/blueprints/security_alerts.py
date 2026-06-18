@@ -71,6 +71,14 @@ def broadcast():
     return jsonify(result.data[0]), 201
 
 
+@security_alerts_bp.get('/broadcasts')
+@require_auth
+def list_broadcasts():
+    sb = get_admin_client()
+    result = sb.table('admin_broadcasts').select('*').eq('society_id', g.society_id).order('sent_at', desc=True).execute()
+    return jsonify(result.data)
+
+
 @security_alerts_bp.get('/')
 @require_auth
 def list_alerts():
